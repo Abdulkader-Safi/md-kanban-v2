@@ -4044,6 +4044,9 @@ dependencies = [
 name = "mdk-markdown"
 version = "0.1.0"
 dependencies = [
+ "gpui-kit",
+ "mermaid-rs-renderer",
+ "ratex-gpui",
  "regex",
 ]
 

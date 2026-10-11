@@ -774,6 +774,13 @@ impl Board {
         self.cards.get(key)
     }
 
+    /// Every card of one project, in no particular order.
+    pub fn cards_in<'a>(&'a self, project: &'a str) -> impl Iterator<Item = &'a Card> {
+        self.cards
+            .values()
+            .filter(move |card| card.key.project == project)
+    }
+
     pub fn card_count(&self) -> usize {
         self.cards.len()
     }

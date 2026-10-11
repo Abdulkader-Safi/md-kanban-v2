@@ -19,15 +19,17 @@ use gpui_kit::component::input::{
     Backspace, Delete, Editor, EditorState, Enter, Escape, IndentInline, Input, InputEvent,
     InputState, OutdentInline, Redo, Undo,
 };
-use gpui_kit::component::text::TextView;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use mdk_format::{CardPatch, Priority, Status};
 use mdk_markdown::commands::{self, Edit, ListKind};
+use mdk_markdown::preview::{self, PreviewContext};
+use mdk_markdown::source::CardRef;
 use mdk_vim::{Handled, Mode, Vim, VimBuffer};
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 actions!(md_editor, [FormatBold, FormatItalic, FormatCode]);
@@ -433,7 +435,7 @@ impl Mdk {
     }
 
     /// Something in the form changed: save 500 ms after the last change.
-    fn editor_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn editor_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = &mut self.editor else {
             return;
         };
@@ -674,6 +676,128 @@ impl Mdk {
         })
     }
 
+    /// Tick or untick the nth checkbox of the body, from the preview's Subtasks box.
+    pub fn toggle_preview_subtask(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        editor.body.update(cx, |state, cx| {
+            let text = mdk_format::toggle_subtask(&state.value(), index);
+            let cursor = state.cursor().min(text.len());
+            apply_edit(
+                state,
+                Edit {
+                    text,
+                    selection: cursor..cursor,
+                },
+                window,
+                cx,
+            );
+        });
+        // Changing the text from code is not typing, so ask for the save here.
+        self.editor_changed(window, cx);
+    }
+
+    /// The Preview tab: the Subtasks box, then the rendered body.
+    fn preview_tab(
+        &self,
+        editor: &CardEditor,
+        c: Colors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let body = editor.body.read(cx).value().to_string();
+        let subtasks = mdk_format::subtasks(&body);
+        let done = subtasks.iter().filter(|s| s.done).count();
+        let project = editor.key.project.clone();
+        let context = PreviewContext {
+            root: self
+                .board
+                .project(&project)
+                .map(|p| p.root.clone())
+                .unwrap_or_default(),
+            page_path: editor.key.rel_path.clone(),
+            cards: Arc::new(
+                self.board
+                    .cards_in(&project)
+                    .map(|card| CardRef {
+                        id: card.data.id.clone(),
+                        title: card.data.title.clone(),
+                        rel_path: card.key.rel_path.clone(),
+                    })
+                    .collect(),
+            ),
+        };
+        let this = cx.entity();
+        // `%% comments %%` stay in the file and out of the preview.
+        let rendered = preview::view(
+            "preview",
+            &mdk_format::strip_comments(&body),
+            &context,
+            move |rel_path, window, cx| {
+                let key = CardKey {
+                    project: project.clone(),
+                    rel_path: rel_path.to_string(),
+                };
+                this.update(cx, |this, cx| this.open(key, window, cx));
+            },
+        );
+
+        div()
+            .id("editor-preview")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .border_1()
+            .border_color(c.border)
+            .p_3()
+            .when(!subtasks.is_empty(), |d| {
+                d.child(
+                    div()
+                        .mb_3()
+                        .p_2()
+                        .border_1()
+                        .border_color(c.border)
+                        .bg(c.muted.opacity(0.4))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(c.muted_fg)
+                                .child(format!("Subtasks {done}/{}", subtasks.len())),
+                        )
+                        .children(subtasks.iter().enumerate().map(|(n, subtask)| {
+                            div()
+                                .id(("subtask", n))
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .cursor_pointer()
+                                .hover(|s| s.bg(c.secondary))
+                                .child(if subtask.done { "☑" } else { "☐" })
+                                .child(
+                                    div()
+                                        .when(subtask.done, |d| {
+                                            d.text_color(c.muted_fg).line_through()
+                                        })
+                                        .child(subtask.text.clone()),
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.toggle_preview_subtask(n, window, cx)
+                                }))
+                        })),
+                )
+            })
+            .child(rendered)
+    }
+
     fn set_editor_tab(&mut self, tab: EditorTab, cx: &mut Context<Self>) {
         self.prefs.editor_tab = tab;
         self.prefs_changed(cx);
@@ -877,15 +1001,7 @@ impl Mdk {
                 )
             });
 
-        let preview = div()
-            .id("editor-preview")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .border_1()
-            .border_color(c.border)
-            .p_3()
-            .child(TextView::markdown("preview", editor.body.read(cx).value()).selectable(true));
+        let preview = self.preview_tab(editor, c, cx);
 
         let fields = div()
             .grid()

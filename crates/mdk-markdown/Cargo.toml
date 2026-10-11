@@ -1,9 +1,12 @@
 [package]
 name = "mdk-markdown"
-description = "Markdown editing commands for a formatting toolbar. No UI in here."
+description = "Markdown for mdk: the toolbar's text commands and the card preview."
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [dependencies]
+gpui-kit.workspace = true
+mermaid-rs-renderer = { version = "=0.3.1", default-features = false }
+ratex-gpui = { version = "=0.4.1", default-features = false }
 regex = "1"

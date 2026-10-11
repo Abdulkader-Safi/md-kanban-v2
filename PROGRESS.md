@@ -9,8 +9,9 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M2 app shell and read-only board: built and tested headless. The side-by-side look check against the Electron screenshot is still open
 - M3 moving and creating: built and tested headless, CI green on three OSes (run for `7aed244`). The cross-check in the running Electron app is open
 - M4 card editor and markdown editor: built and tested headless
-- M5 Vim mode: built and tested, table tests for every FR-VIM-02 command. The manual check in the real window is open
-- M6 to M8: not started
+- M5 Vim mode: built and tested, table tests for every FR-VIM-02 command, CI green on three OSes (run for `5888e2a`). The manual check in the real window is open
+- M6 preview: built and tested headless
+- M7 and M8: not started
 
 ## Decisions and deviations
 
@@ -30,6 +31,30 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M6 notes
+
+Built, in `mdk-markdown`: `source` (plain text: the source rewrite, link and wikilink resolution, callout headers, the dollar guard, code fence titles) and `preview` (gpui-kit's `TextView` with mdk's plugins, as one `view()` function any GPUI app can call). In the app: the Preview tab with the Subtasks box above the rendered body.
+
+The preview renders GitHub-flavoured markdown (the kit's own), plus: GitHub and Obsidian callouts in five looks with `-` and `+` folding; `$inline$` and `$$block$$` maths through `ratex-gpui`, with the dollar guard and red source for a bad formula; Mermaid through `mermaid-rs-renderer`, drawn on a background thread and cached, with the source and error for a bad diagram; a code block header with the language or `title="..."` and Copy; `==highlight==`; `%% comments %%` hidden; wikilinks (`[[card]]`, `[[card|label]]`, `[[card#Heading]]`) and relative links that open the card; dead links and unresolved wikilinks dimmed; `![alt](path)` and `![[image.png|300]]` read from the project folder only; remote images shown as a link and never fetched; raw HTML shown as text, with `<br>` as a line break.
+
+Checked:
+
+- `crates/mdk-markdown/tests/source.rs`, 10 test groups. Every case in Electron's `render.check.ts` that does not depend on HTML output is there with the same input: link resolution inside the project only, image paths, wikilinks by title, id, path and heading, embeds, highlights, the dollar guard, callout types and folding, code titles, and that script, iframe, style and event-handler HTML comes out escaped.
+- `crates/mdk/tests/editor.rs`: one card holding every element is opened on the Preview tab and each custom element kind is seen to draw, including the error states. Looking at the preview writes nothing. Ticking a subtask in the Subtasks box changes that one checkbox in the file and the card face count.
+
+Not checked: how any of it looks in both themes, clicking a wikilink or a folded callout in the real window, and text selection.
+
+Decisions and deviations:
+
+- Wikilinks, embeds and `==highlight==` are rewritten in the source before parsing (M0 finding). A highlight is one inline box.
+- Raw HTML is escaped in the source so the kit's HTML support never sees it. `<br>` and autolinks are left alone.
+- A code fence's title is set aside by the rewrite and looked up by the block's code when the header draws, because the kit's code block hook gives the language and the code but not the fence's info string.
+- Electron's `{2}` line highlights and `[!code ++]` diff markers in code blocks are not built. The spec does not ask for them.
+- Callout types map to Electron's five looks (note, tip, warning, danger, quote).
+- Mermaid uses the renderer's stock dark and light themes, not mdk's colours. A panic inside the renderer is caught and shown as the diagram's error.
+- Heading anchors and the outline from Electron's renderer are not built. Nothing in the spec uses them.
+- Inline maths is drawn at the text size with no baseline shift, so it can sit a little high.
 
 ## M5 notes
 

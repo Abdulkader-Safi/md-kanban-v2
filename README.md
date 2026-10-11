@@ -10,7 +10,8 @@ In progress. The build follows `resources/06-build-spec.md`, milestone by milest
 
 - Works today: connect folders, see their cards in five columns, filter by project and work folder, and watch the board update when another program edits a card file. Drag cards between columns, move them with the "⋯" menu or the keyboard, create cards with quick-add (`Fix login p1 #backend @safi due:friday`), archive done cards, and undo any of it. Click a card to edit it: fields, a markdown editor with a formatting toolbar, and autosave. If an agent changes the file while you have unsaved edits, mdk asks which version to keep.
 - Vim keys in the card editor (switch in the sidebar): normal, insert and visual modes, `h j k l w b e 0 ^ $ gg G` with counts, `d c y` with motions, `x dd yy p P u Ctrl-r`, `/` search, `:q`.
-- Not built yet: the full preview (maths, Mermaid, callouts, wikilinks), filters and saved views, the list view, the command palette, release builds.
+- The Preview tab renders the card: tables, task lists, code with a Copy button, maths (`$x^2$`), Mermaid diagrams, GitHub and Obsidian callouts, `==highlights==`, `[[wikilinks]]` that open the card, and images from the project folder. A Subtasks box on top lets you tick checkboxes.
+- Not built yet: filters and saved views, the list view, the command palette, release builds.
 
 Keys on the board: arrows move between cards, Enter opens one, Space picks a card up and drops it, Esc cancels, `N` makes a new card, Cmd or Ctrl+Z undoes and Shift+Z redoes.
 
@@ -65,7 +66,7 @@ Environment variables:
 
 - `crates/mdk-format`: the card format. Parse and write card files, quick-add, due labels.
 - `crates/mdk`: the app. Board state, preferences, theme and views.
-- `crates/mdk-markdown`: the formatting toolbar's text commands.
+- `crates/mdk-markdown`: the formatting toolbar's text commands, and the rendered preview with its plugins.
 - `crates/mdk-vim`: a small Vim over any text buffer.
 - `crates/mdk-store`: file access for a project folder. Scan, guarded reads, atomic writes, live watching.
 - `spikes/`: the M0 spikes.

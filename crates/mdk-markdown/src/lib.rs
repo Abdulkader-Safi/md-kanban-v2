@@ -1,6 +1,12 @@
-//! Markdown helpers for mdk that need no UI.
+//! Markdown for mdk.
 //!
-//! `commands` holds the formatting toolbar's text edits, ported from the Electron app's
-//! `md-commands.ts`. The preview's parsing helpers join it in a later milestone.
+//! - [`commands`]: the formatting toolbar's text edits. Plain text in, plain text out.
+//! - [`source`]: what the preview does to markdown before it is parsed, and how links and
+//!   wikilinks find their cards. Also plain text.
+//! - [`preview`]: the rendered preview, as a gpui-kit `TextView` with mdk's plugins.
+//!
+//! None of it knows about the board.
 
 pub mod commands;
+pub mod preview;
+pub mod source;

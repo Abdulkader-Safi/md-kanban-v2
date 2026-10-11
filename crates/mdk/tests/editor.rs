@@ -761,3 +761,92 @@ fn with_vim_off_the_editor_is_a_plain_editor(cx: &mut TestAppContext) {
     fx.press(cx, "escape");
     assert!(!fx.is_open(cx), "Escape closes the card when Vim is off");
 }
+
+// ---- M6: the preview ------------------------------------------------------------------------
+
+const SHOWCASE: &str = "---\nid: \"showcase\"\nstatus: \"todo\"\norder: 9\n---\n# Preview showcase\n\nA [[Fix login]] wikilink, a missing [[nope]], a [relative link](login.md), a [dead one](../../etc/passwd), an [external link](https://example.com) and ==highlighted words==. It costs $5 a month, or $50 a year. Inline maths $e^{i\\pi} + 1 = 0$ and a bad one $\\frac{1}{$.\n\n%% a private note %%\n\n- [ ] first subtask\n- [x] second subtask\n\n> [!NOTE]\n> An open callout with a [[Fix login]] link.\n\n> [!faq]- Folded\n> Hidden until opened.\n\n$$\n\\int_0^1 x\\,dx\n$$\n\n```rust title=\"src/main.rs\"\nfn main() {}\n```\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n```mermaid\nthis is not a diagram\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n![[pic.png|96]] ![gone](missing.png) ![remote](https://example.com/x.png)\n\n<script>alert(1)</script> and a line<br>break.\n";
+
+#[gpui_kit::test]
+fn the_preview_draws_every_kind_of_element(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let fx = open(cx);
+    fs::write(fx.path("showcase.md"), SHOWCASE).unwrap();
+    fs::write(fx.path("pic.png"), include_bytes!("pic.png")).unwrap();
+    cx.update(|cx| fx.view.update(cx, |view, cx| view.rescan("proj", cx)));
+    fx.settle(cx);
+    fx.with(cx, |view, _, cx| {
+        view.prefs.editor_tab = mdk::prefs::EditorTab::Preview;
+        cx.notify();
+    });
+    fx.open_card(cx, "showcase.md");
+    // Markdown parses and diagrams draw on background threads. Give them a few frames.
+    let wanted = [
+        "callout-open",
+        "callout-folded",
+        "math",
+        "math-error",
+        "mermaid",
+        "mermaid-error",
+        "code-header",
+        "highlight",
+        "link-missing",
+        "image-local",
+        "image-missing",
+        "image-remote",
+    ];
+    let mut drawn = Default::default();
+    for _ in 0..40 {
+        fx.settle(cx);
+        drawn = mdk_markdown::preview::drawn();
+        if wanted.iter().all(|kind| drawn.contains(kind)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for kind in wanted {
+        assert!(drawn.contains(kind), "{kind} was not drawn. Drew {drawn:?}");
+    }
+    assert_eq!(
+        fx.read("showcase.md"),
+        SHOWCASE,
+        "looking at the preview writes nothing"
+    );
+}
+
+#[gpui_kit::test]
+fn ticking_a_subtask_in_the_preview_changes_the_file(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fs::write(fx.path("showcase.md"), SHOWCASE).unwrap();
+    cx.update(|cx| fx.view.update(cx, |view, cx| view.rescan("proj", cx)));
+    fx.settle(cx);
+    fx.open_card(cx, "showcase.md");
+    fx.with(cx, |view, window, cx| {
+        view.toggle_preview_subtask(0, window, cx)
+    });
+    fx.wait_for_autosave(cx);
+    let after = fx.read("showcase.md");
+    assert!(
+        after.contains("- [x] first subtask\n- [x] second subtask\n"),
+        "{after}"
+    );
+    assert!(
+        after.contains("%% a private note %%"),
+        "comments stay in the file"
+    );
+    cx.update(|cx| {
+        let view = fx.view.read(cx);
+        assert_eq!(
+            view.board.card(&key("showcase.md")).unwrap().subtasks,
+            (2, 2)
+        );
+    });
+    // Untick the second one.
+    fx.with(cx, |view, window, cx| {
+        view.toggle_preview_subtask(1, window, cx)
+    });
+    fx.wait_for_autosave(cx);
+    assert!(
+        fx.read("showcase.md")
+            .contains("- [x] first subtask\n- [ ] second subtask\n")
+    );
+}
