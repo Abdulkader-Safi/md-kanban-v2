@@ -8,8 +8,10 @@ mdk is a Rust rebuild of [MD Kanban](https://github.com/Abdulkader-Safi/md-kanba
 
 In progress. The build follows `resources/06-build-spec.md`, milestone by milestone, and `PROGRESS.md` has the current state.
 
-- Works today: connect folders, see their cards in five columns, filter by project and work folder, and watch the board update when another program edits a card file.
-- Read-only so far. Moving, creating and editing cards come next (milestones M3 and M4), then Vim keys, the preview, filters and the command palette.
+- Works today: connect folders, see their cards in five columns, filter by project and work folder, and watch the board update when another program edits a card file. Drag cards between columns, move them with the "⋯" menu or the keyboard, create cards with quick-add (`Fix login p1 #backend @safi due:friday`), archive done cards, and undo any of it.
+- Not built yet: editing a card (the card sheet is read-only), Vim keys, the rendered preview, filters and saved views, the list view, the command palette, release builds.
+
+Keys on the board: arrows move between cards, Enter opens one, Space picks a card up and drops it, Esc cancels, `N` makes a new card, Cmd or Ctrl+Z undoes and Shift+Z redoes.
 
 ## What you need
 

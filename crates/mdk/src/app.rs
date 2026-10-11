@@ -1,11 +1,13 @@
 //! The root view. It owns the board and the preferences, and wires both to the window:
 //! background scans, the file watcher, saving the config, and the single-instance signal.
 
-use crate::board::{Board, CardKey, ProjectId};
+use crate::board::{Board, CardKey, NewCard, ProjectId};
 use crate::prefs::{Prefs, SavedProject, ThemeChoice, WindowState};
 use crate::theme;
+use crate::views::NewCardForm;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use gpui_kit::base::AutoScroll;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use mdk_format::{Date, Status};
@@ -14,12 +16,38 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-actions!(mdk, [Quit, CloseTop, ConnectFolder, RescanAll, ToggleTheme]);
+actions!(
+    mdk,
+    [
+        Quit,
+        CloseTop,
+        Undo,
+        Redo,
+        NewCardKey,
+        PickUp,
+        OpenFocused,
+        FocusUp,
+        FocusDown,
+        FocusLeft,
+        FocusRight
+    ]
+);
 
+/// "Mdk" is the whole window. "Board" is the board area only, so its plain keys (N, Space,
+/// arrows) never fire while the user is typing in a dialog or the editor.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("escape", CloseTop, Some("Mdk")),
+        KeyBinding::new("secondary-z", Undo, Some("Mdk")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("Mdk")),
+        KeyBinding::new("n", NewCardKey, Some("Board")),
+        KeyBinding::new("space", PickUp, Some("Board")),
+        KeyBinding::new("enter", OpenFocused, Some("Board")),
+        KeyBinding::new("up", FocusUp, Some("Board")),
+        KeyBinding::new("down", FocusDown, Some("Board")),
+        KeyBinding::new("left", FocusLeft, Some("Board")),
+        KeyBinding::new("right", FocusRight, Some("Board")),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
 }
@@ -87,6 +115,33 @@ pub fn single_instance(config_dir: &Path) -> Option<Instance> {
     Some(rx)
 }
 
+/// A short message at the bottom of the window. It goes away after five seconds.
+pub struct Toast {
+    pub text: String,
+    /// Show an Undo button.
+    pub undo: bool,
+}
+
+/// A question the user must answer before something destructive happens.
+pub enum Confirm {
+    /// Archive this many done cards.
+    Archive(usize),
+}
+
+/// A card picked up with Space, and where it was, so Escape can put it back.
+pub struct Grabbed {
+    pub key: CardKey,
+    status: Status,
+    order: f64,
+}
+
+/// The payload of a card drag. It also draws the preview that follows the pointer.
+#[derive(Clone)]
+pub struct DragCard {
+    pub key: CardKey,
+    pub title: SharedString,
+}
+
 pub struct Mdk {
     pub board: Board,
     pub prefs: Prefs,
@@ -97,7 +152,7 @@ pub struct Mdk {
     events: UnboundedSender<(ProjectId, Vec<StoreEvent>)>,
     /// One virtualised list per column, and the cards each one currently shows. Every list
     /// has one row more than its cards: the last row is "+ Add card".
-    pub(crate) lists: Vec<ListState>,
+    pub lists: Vec<ListState>,
     pub(crate) columns: Vec<Vec<(CardKey, u64)>>,
     /// The card open in the side sheet.
     pub open_card: Option<CardKey>,
@@ -105,9 +160,27 @@ pub struct Mdk {
     pub(crate) show_sidebar: bool,
     /// Local time of the last refresh, for the "checked" line.
     pub(crate) last_check: Option<String>,
-    /// One line of news for the user. Toasts replace this in M3.
+    /// A problem that stays on screen until dismissed, such as a config that would not load.
     pub notice: Option<String>,
+    pub toast: Option<Toast>,
+    toast_task: Option<Task<()>>,
+    pub confirm: Option<Confirm>,
+    /// The New card dialog, when open.
+    pub new_card: Option<NewCardForm>,
+    /// The card the keyboard is on.
+    pub focused: Option<CardKey>,
+    pub grabbed: Option<Grabbed>,
+    /// The card whose move menu is open.
+    pub(crate) menu_for: Option<CardKey>,
+    /// While dragging: the card in the air and where it would land, as (column, row).
+    pub(crate) dragging: Option<CardKey>,
+    pub slot: Option<(usize, usize)>,
+    column_scroll: AutoScroll,
+    board_auto_scroll: AutoScroll,
+    scroll_column: usize,
+    pub(crate) board_scroll: ScrollHandle,
     save_task: Option<Task<()>>,
+    /// Focus for the board area, which owns the plain-key shortcuts.
     pub(crate) focus: FocusHandle,
 }
 
@@ -196,6 +269,19 @@ impl Mdk {
             show_sidebar: false,
             last_check: None,
             notice,
+            toast: None,
+            toast_task: None,
+            confirm: None,
+            new_card: None,
+            focused: None,
+            grabbed: None,
+            menu_for: None,
+            dragging: None,
+            slot: None,
+            column_scroll: AutoScroll::default(),
+            board_auto_scroll: AutoScroll::default(),
+            scroll_column: 0,
+            board_scroll: ScrollHandle::new(),
             save_task: None,
             focus: cx.focus_handle(),
         };
@@ -476,23 +562,341 @@ impl Mdk {
         }
     }
 
-    // ---- actions the later milestones fill in -----------------------------------------------
+    // ---- toasts ----------------------------------------------------------------------------
 
-    /// Open the New card dialog for a column. The dialog arrives in M3.
-    pub fn new_card(&mut self, _status: Status, cx: &mut Context<Self>) {
-        self.notice = Some("Creating cards arrives in the next milestone (M3).".into());
+    pub fn show_toast(&mut self, text: impl Into<String>, undo: bool, cx: &mut Context<Self>) {
+        self.toast = Some(Toast {
+            text: text.into(),
+            undo,
+        });
+        self.toast_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(5)).await;
+            this.update(cx, |this, cx| {
+                this.toast = None;
+                cx.notify();
+            })
+            .ok();
+        }));
         cx.notify();
     }
 
+    /// Show the outcome of a board action: an error as a toast, and the board redrawn.
+    fn settle<T>(&mut self, result: Result<T, String>, cx: &mut Context<Self>) -> Option<T> {
+        let value = match result {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.show_toast(error, false, cx);
+                None
+            }
+        };
+        self.changed(cx);
+        value
+    }
+
+    // ---- moving -----------------------------------------------------------------------------
+
+    /// Move a card and offer Undo. `index` counts the column's other cards; `None` is the end.
+    pub fn move_card(
+        &mut self,
+        key: &CardKey,
+        status: Status,
+        index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_for = None;
+        let moved = self.board.move_card(key, status, index);
+        if self.settle(moved, cx) == Some(true) {
+            self.show_toast(format!("Moved to {}", status.name()), true, cx);
+        }
+    }
+
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
+        let undone = self.board.undo();
+        if let Some(Some(label)) = self.settle(undone, cx) {
+            self.show_toast(format!("Undid: {label}"), false, cx);
+        }
+    }
+
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
+        let redone = self.board.redo();
+        if let Some(Some(label)) = self.settle(redone, cx) {
+            self.show_toast(format!("Redid: {label}"), false, cx);
+        }
+    }
+
+    /// Ask before archiving. Nothing happens when there are no done cards on show.
+    pub fn ask_archive(&mut self, cx: &mut Context<Self>) {
+        let count = self.board.archivable().len();
+        if count > 0 {
+            self.confirm = Some(Confirm::Archive(count));
+            cx.notify();
+        }
+    }
+
+    pub fn answer_confirm(&mut self, yes: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(confirm) = self.confirm.take() else {
+            return;
+        };
+        if yes {
+            match confirm {
+                Confirm::Archive(_) => {
+                    let archived = self.board.archive_done();
+                    if let Some(count) = self.settle(archived, cx) {
+                        self.show_toast(format!("Archived {count} cards to archive/"), true, cx);
+                    }
+                }
+            }
+        }
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    // ---- drag and drop ----------------------------------------------------------------------
+
+    /// The pointer moved during a drag. Every column hears this, so check the bounds.
+    pub(crate) fn drag_move(
+        &mut self,
+        column: usize,
+        ev: &DragMoveEvent<DragCard>,
+        cx: &mut Context<Self>,
+    ) {
+        let pos = ev.event.position;
+        if !ev.bounds.contains(&pos) {
+            if self.slot.is_some_and(|(c, _)| c == column) {
+                self.slot = None;
+                self.column_scroll.set(None, cx, |_, _: &mut Self, _| {});
+                cx.notify();
+            }
+            return;
+        }
+        let list = &self.lists[column];
+        let len = self.columns[column].len();
+        // The first card whose middle is below the pointer. No such card means the end.
+        let mut row = len;
+        for i in list.logical_scroll_top().item_ix..len {
+            match list.bounds_for_item(i) {
+                Some(bounds) if pos.y >= bounds.center().y => {}
+                _ => {
+                    row = i;
+                    break;
+                }
+            }
+        }
+        if self.slot != Some((column, row)) {
+            self.slot = Some((column, row));
+            cx.notify();
+        }
+        self.scroll_column = column;
+        let delta = AutoScroll::compute_delta(pos.y, list.viewport_bounds());
+        self.column_scroll.set(delta, cx, |d, this: &mut Self, cx| {
+            this.lists[this.scroll_column].scroll_by(d);
+            cx.notify();
+        });
+    }
+
+    /// Scroll the board sideways while a drag is near its left or right edge.
+    pub(crate) fn board_drag_move(&mut self, ev: &DragMoveEvent<DragCard>, cx: &mut Context<Self>) {
+        // compute_delta works on y, so hand it the board's x range as if it were vertical.
+        let sideways = Bounds::new(
+            point(px(0.), ev.bounds.left()),
+            size(px(0.), ev.bounds.size.width),
+        );
+        let delta = AutoScroll::compute_delta(ev.event.position.x, sideways);
+        self.board_auto_scroll
+            .set(delta, cx, |d, this: &mut Self, cx| {
+                let (offset, max) = (this.board_scroll.offset(), this.board_scroll.max_offset());
+                let x = (offset.x - d).clamp(-max.x, px(0.));
+                this.board_scroll.set_offset(point(x, offset.y));
+                cx.notify();
+            });
+    }
+
+    pub(crate) fn drop_card(&mut self, column: usize, drag: &DragCard, cx: &mut Context<Self>) {
+        let status = Status::ALL[column];
+        let cards = &self.columns[column];
+        let mut row = match self.slot {
+            Some((c, row)) if c == column => row,
+            _ => cards.len(),
+        };
+        let current = cards.iter().position(|(key, _)| *key == drag.key);
+        self.end_drag();
+        // The slot counts the dragged card too. Dropping it where it is moves nothing.
+        if let Some(current) = current {
+            if row == current || row == current + 1 {
+                cx.notify();
+                return;
+            }
+            if current < row {
+                row -= 1;
+            }
+        }
+        self.move_card(&drag.key.clone(), status, Some(row), cx);
+    }
+
+    pub(crate) fn end_drag(&mut self) {
+        self.slot = None;
+        self.dragging = None;
+        self.column_scroll.stop();
+        self.board_auto_scroll.stop();
+    }
+
+    // ---- keyboard: card focus and moving ----------------------------------------------------
+
+    fn place_of(&self, key: &CardKey) -> Option<(usize, usize)> {
+        self.columns
+            .iter()
+            .enumerate()
+            .find_map(|(c, cards)| cards.iter().position(|(k, _)| k == key).map(|row| (c, row)))
+    }
+
+    fn focus_card(&mut self, column: usize, row: usize, cx: &mut Context<Self>) {
+        if let Some((key, _)) = self.columns[column].get(row) {
+            self.focused = Some(key.clone());
+            self.lists[column].scroll_to_reveal_item(row);
+            cx.notify();
+        }
+    }
+
+    /// An arrow key. With a card picked up it moves the card, otherwise it moves the focus.
+    /// `dx` and `dy` are -1, 0 or 1.
+    pub(crate) fn arrow(&mut self, dx: isize, dy: isize, cx: &mut Context<Self>) {
+        let place = self.focused.as_ref().and_then(|key| self.place_of(key));
+        let Some((column, row)) = place else {
+            // Nothing focused yet: start at the top of the first column that has cards.
+            if let Some(first) = self.columns.iter().position(|cards| !cards.is_empty()) {
+                self.focus_card(first, 0, cx);
+            }
+            return;
+        };
+        if let Some(key) = self.grabbed.as_ref().map(|g| g.key.clone()) {
+            let last = self.columns[column].len() - 1;
+            if dx != 0 {
+                if let Some(status) = Status::ALL.get(column.wrapping_add_signed(dx)) {
+                    self.move_card(&key, *status, None, cx);
+                }
+            } else if (dy < 0 && row > 0) || (dy > 0 && row < last) {
+                self.move_card(
+                    &key,
+                    Status::ALL[column],
+                    Some(row.wrapping_add_signed(dy)),
+                    cx,
+                );
+            }
+            if let Some((column, row)) = self.place_of(&key) {
+                self.lists[column].scroll_to_reveal_item(row);
+            }
+            return;
+        }
+        if dx != 0 {
+            // The nearest column in that direction that has cards.
+            let mut next = column.wrapping_add_signed(dx);
+            while self.columns.get(next).is_some_and(Vec::is_empty) {
+                next = next.wrapping_add_signed(dx);
+            }
+            if let Some(cards) = self.columns.get(next) {
+                self.focus_card(next, row.min(cards.len() - 1), cx);
+            }
+        } else {
+            let last = self.columns[column].len() - 1;
+            self.focus_card(column, row.saturating_add_signed(dy).min(last), cx);
+        }
+    }
+
+    /// Space: pick up the focused card, or drop the one in hand.
+    pub(crate) fn pick_up_or_drop(&mut self, cx: &mut Context<Self>) {
+        if self.grabbed.take().is_none()
+            && let Some(card) = self.focused.as_ref().and_then(|key| self.board.card(key))
+        {
+            if card.error().is_some() {
+                self.show_toast("Fix the frontmatter first", false, cx);
+            } else {
+                self.grabbed = Some(Grabbed {
+                    key: card.key.clone(),
+                    status: card.data.status,
+                    order: card.data.order,
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// Escape while a card is picked up: put it back where it was.
+    fn cancel_grab(&mut self, cx: &mut Context<Self>) {
+        let Some(grabbed) = self.grabbed.take() else {
+            return;
+        };
+        let moved = self
+            .board
+            .card(&grabbed.key)
+            .is_some_and(|c| c.data.status != grabbed.status || c.data.order != grabbed.order);
+        if moved {
+            let patch = mdk_format::CardPatch {
+                status: Some(grabbed.status),
+                order: Some(grabbed.order),
+                ..Default::default()
+            };
+            let restored = self.board.update_card(&grabbed.key, &patch);
+            self.settle(restored, cx);
+        }
+        self.toast = None;
+        cx.notify();
+    }
+
+    // ---- creating ---------------------------------------------------------------------------
+
+    /// Open the New card dialog for a column.
+    pub fn open_new_card(&mut self, status: Status, window: &mut Window, cx: &mut Context<Self>) {
+        if self.board.projects.is_empty() {
+            self.show_toast("Connect a folder first", false, cx);
+            return;
+        }
+        let folder = self.board.selected_workspace.clone().unwrap_or_default();
+        let form = NewCardForm::new(status, &folder, window, cx);
+        form.title.update(cx, |title, cx| title.focus(window, cx));
+        self.new_card = Some(form);
+        cx.notify();
+    }
+
+    pub fn close_new_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_card = None;
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Create a card. Returns its key, or `None` after showing why it failed.
+    pub fn create_card(
+        &mut self,
+        input: NewCard,
+        workspace: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Option<CardKey> {
+        let created = self.board.create_card(input, workspace, today());
+        let key = self.settle(created, cx)?;
+        self.focused = Some(key.clone());
+        Some(key)
+    }
+
+    // ---- opening and closing ----------------------------------------------------------------
+
     pub fn open(&mut self, key: CardKey, cx: &mut Context<Self>) {
+        self.menu_for = None;
         self.open_card = Some(key);
         cx.notify();
     }
 
-    pub(crate) fn close_top(&mut self, _: &CloseTop, _: &mut Window, cx: &mut Context<Self>) {
-        if self.open_card.take().is_none() {
+    /// Escape closes the top thing: a confirm, the dialog, a picked-up card, the menu, the
+    /// sheet, then the sidebar overlay.
+    pub(crate) fn close_top(&mut self, _: &CloseTop, window: &mut Window, cx: &mut Context<Self>) {
+        if self.confirm.is_some() {
+            self.answer_confirm(false, window, cx);
+        } else if self.new_card.is_some() {
+            self.close_new_card(window, cx);
+        } else if self.grabbed.is_some() {
+            self.cancel_grab(cx);
+        } else if self.menu_for.take().is_none() && self.open_card.take().is_none() {
             self.show_sidebar = false;
         }
+        self.focus.focus(window, cx);
         cx.notify();
     }
 }

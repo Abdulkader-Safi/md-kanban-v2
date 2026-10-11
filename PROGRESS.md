@@ -7,7 +7,8 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M0 de-risk: spikes done. Open items settled by best practice on Safi's say-so (see decisions)
 - M1 core crates: done. Tests green on macOS, Windows and Ubuntu, and `cargo-deny` passes (CI run 38145737412)
 - M2 app shell and read-only board: built and tested headless. The side-by-side look check against the Electron screenshot is still open
-- M3 to M8: not started
+- M3 moving and creating: built and tested headless. The cross-check that Electron reads mdk-written files in the running Electron app is open
+- M4 to M8: not started
 
 ## Decisions and deviations
 
@@ -27,6 +28,29 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M3 notes
+
+Built: drag and drop between and within columns with a drop slot, column highlight and edge auto-scroll; the "⋯" move menu; keyboard moving (arrows move the focus, Space picks up, arrows move the card, Space drops, Esc puts it back); undo and redo of move, create, delete and archive on Cmd or Ctrl+Z and Shift+Z; a "Moved to X" toast with Undo for 5 seconds; the New card dialog with quick-add hint, the three templates and a date picker; archive with a confirm that states the count.
+
+Checked by tests (74 in the workspace):
+
+- `crates/mdk/tests/board_writes.rs`, 13 tests on real files: a move writes only `status`, `order` and `modified`; unknown keys survive; an agent's unseen edit survives a move; colliding orders renumber the column; a broken card cannot be moved; undo and redo restore exact bytes; undo is refused when the file changed since; undo of a delete restores a CRLF file with a BOM byte for byte; archive renames without changing content.
+- `crates/mdk/tests/app.rs`, 14 tests in a headless window: a real drag rewrites the file; dropping a card where it is writes nothing; a broken card's drag is refused with the toast; the keyboard move and its Escape; `N` then typing then Enter creates a card from quick-add; Escape closes the dialog; archive asks first.
+
+Not checked: the look of any of it (screen locked), drag smoothness on the real board, the move menu's placement on screen, the date picker by hand, and Electron opening mdk-written files in the running Electron app. The golden tests do show mdk's output matches Electron's writer byte for byte.
+
+Decisions:
+
+- A drop's index is taken from the cards the column shows, and so is the new `order`. Electron takes neighbours from the whole project, which gives odd results when a filter is on.
+- When orders collide, the visible column is renumbered 0, 10, 20 and each renumbered file is written. Electron renumbers in memory only.
+- Archive is a pure rename. Electron rewrites the file and bumps `modified`. A rename keeps `git status` showing renames, as FR-BOARD-05 asks.
+- A new card's id is its file stem, including a `-2` suffix, so ids stay unique in a project.
+- Keyboard focus is one "focused card" owned by the board area, moved with the arrow keys and opened with Enter. Electron uses the browser's Tab order. Plain keys (N, Space, arrows, Enter) are bound to a "Board" key context so they never fire while typing in a dialog.
+- Esc during a keyboard move writes the card's old status and order back as one more edit. It is on the undo stack.
+- Toasts, the confirm dialog and the New card dialog are hand-built overlays, not gpui-kit's notification and dialog. Status and priority are chip rows, not selects.
+- Own-write detection keeps the previous save of a file for one second as well as the latest. CI on Linux showed the watcher can read a file between two quick saves.
+- The file watcher is switched off in headless tests except the one live-update test. GPUI's test scheduler does not allow wake-ups from other threads.
 
 ## M2 notes
 

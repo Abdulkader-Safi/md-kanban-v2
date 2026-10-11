@@ -2,9 +2,15 @@
 //! card sheet. The sidebar and the board have their own files.
 
 mod board_view;
+mod new_card;
 mod sidebar;
 
-use crate::app::Mdk;
+pub use new_card::NewCardForm;
+
+use crate::app::{
+    Confirm, DragCard, FocusDown, FocusLeft, FocusRight, FocusUp, Mdk, NewCardKey, OpenFocused,
+    PickUp, Redo, Undo,
+};
 use crate::board::CardKey;
 use crate::theme::icon;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -24,6 +30,8 @@ pub(crate) struct Colors {
     pub secondary: Hsla,
     pub card: Hsla,
     pub primary: Hsla,
+    /// Teal that reads as text on the background.
+    pub link: Hsla,
     pub sidebar: Hsla,
     pub accent: Hsla,
     pub accent_fg: Hsla,
@@ -42,6 +50,7 @@ impl Colors {
             secondary: t.secondary,
             card: t.popover,
             primary: t.primary,
+            link: t.link,
             sidebar: t.sidebar,
             accent: t.sidebar_accent,
             accent_fg: t.sidebar_accent_foreground,
@@ -58,11 +67,16 @@ impl Render for Mdk {
         let c = Colors::of(cx);
         let narrow = window.viewport_size().width < NARROW;
         let font = cx.theme().font_family.clone();
+        // A drag that ended outside every column leaves its slot behind. Clear it.
+        if !cx.has_active_drag() && (self.slot.is_some() || self.dragging.is_some()) {
+            self.end_drag();
+        }
         div()
             .id("mdk")
             .key_context("Mdk")
-            .track_focus(&self.focus)
             .on_action(cx.listener(Self::close_top))
+            .on_action(cx.listener(|this, _: &Undo, _, cx| this.undo(cx)))
+            .on_action(cx.listener(|this, _: &Redo, _, cx| this.redo(cx)))
             .relative()
             .size_full()
             .flex()
@@ -98,6 +112,65 @@ impl Render for Mdk {
             .when_some(self.open_card.clone(), |d, key| {
                 d.child(self.sheet(&key, c, cx))
             })
+            .when_some(self.new_card.as_ref(), |d, form| {
+                d.child(self.new_card_dialog(form, c, cx))
+            })
+            .when_some(self.confirm.as_ref(), |d, confirm| {
+                d.child(self.confirm_dialog(confirm, c, cx))
+            })
+            .when_some(self.toast.as_ref(), |d, toast| {
+                d.child(
+                    div()
+                        .absolute()
+                        .bottom_4()
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id("toast")
+                                .occlude()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .px_4()
+                                .py_2()
+                                .bg(c.card)
+                                .border_1()
+                                .border_color(c.border)
+                                .shadow_lg()
+                                .child(toast.text.clone())
+                                .when(toast.undo, |d| {
+                                    d.child(
+                                        Button::new("toast-undo")
+                                            .outline()
+                                            .small()
+                                            .label("Undo")
+                                            .on_click(cx.listener(|this, _, _, cx| this.undo(cx))),
+                                    )
+                                }),
+                        ),
+                )
+            })
+    }
+}
+
+impl Render for DragCard {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = Colors::of(cx);
+        div()
+            .w(px(264.))
+            .p_3()
+            .bg(c.card)
+            .border_1()
+            .border_color(c.primary)
+            .shadow_lg()
+            .text_color(c.fg)
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .opacity(0.9)
+            .child(self.title.clone())
     }
 }
 
@@ -185,7 +258,9 @@ impl Mdk {
                     .small()
                     .icon(icon("plus"))
                     .label("New card  N")
-                    .on_click(cx.listener(|this, _, _, cx| this.new_card(Status::Backlog, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_new_card(Status::Backlog, window, cx)
+                    })),
             )
     }
 
@@ -207,6 +282,22 @@ impl Mdk {
         };
 
         div()
+            .id("board-area")
+            .key_context("Board")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &NewCardKey, window, cx| {
+                this.open_new_card(Status::Backlog, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickUp, _, cx| this.pick_up_or_drop(cx)))
+            .on_action(cx.listener(|this, _: &OpenFocused, _, cx| {
+                if let Some(key) = this.focused.clone() {
+                    this.open(key, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FocusUp, _, cx| this.arrow(0, -1, cx)))
+            .on_action(cx.listener(|this, _: &FocusDown, _, cx| this.arrow(0, 1, cx)))
+            .on_action(cx.listener(|this, _: &FocusLeft, _, cx| this.arrow(-1, 0, cx)))
+            .on_action(cx.listener(|this, _: &FocusRight, _, cx| this.arrow(1, 0, cx)))
             .flex()
             .flex_col()
             .flex_1()
@@ -291,7 +382,72 @@ impl Mdk {
                     .primary()
                     .small()
                     .label("Create first card")
-                    .on_click(cx.listener(|this, _, _, cx| this.new_card(Status::Backlog, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_new_card(Status::Backlog, window, cx)
+                    })),
+            )
+    }
+
+    fn confirm_dialog(
+        &self,
+        confirm: &Confirm,
+        c: Colors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let (question, yes) = match confirm {
+            Confirm::Archive(count) => (
+                format!("Archive {count} done cards to archive/?"),
+                "Archive",
+            ),
+        };
+        div()
+            .id("confirm-backdrop")
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(black().opacity(0.4))
+            .on_click(cx.listener(|this, _, window, cx| this.answer_confirm(false, window, cx)))
+            .child(
+                div()
+                    .id("confirm")
+                    .occlude()
+                    .w(px(384.))
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .p_4()
+                    .bg(c.bg)
+                    .border_1()
+                    .border_color(c.border)
+                    .shadow_lg()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(question)
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(
+                                Button::new("confirm-no")
+                                    .ghost()
+                                    .small()
+                                    .label("Cancel")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.answer_confirm(false, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("confirm-yes")
+                                    .primary()
+                                    .small()
+                                    .label(yes)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.answer_confirm(true, window, cx)
+                                    })),
+                            ),
+                    ),
             )
     }
 

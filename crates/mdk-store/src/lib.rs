@@ -16,6 +16,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const SKIP_DIRS: [&str; 4] = ["node_modules", "dist", "out", ".git"];
 /// A card file can sit at most this many folders below the root.
@@ -121,8 +122,13 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_with(path, bytes, |tmp, path| fs::rename(tmp, path))
 }
 
-/// What the store last did to a path: the hash it wrote, or `None` for a delete.
-type OwnWrites = Arc<Mutex<HashMap<String, Option<u64>>>>;
+/// How long a superseded write still counts as the store's own. The watcher can look at a
+/// file between two quick saves and find the first one's content there.
+const OWN_WRITE_GRACE: Duration = Duration::from_secs(1);
+
+/// What the store did to each path, oldest first: the hash it wrote (`None` for a delete)
+/// and when. The last entry is the current one. Older ones only bridge two quick saves.
+type OwnWrites = Arc<Mutex<HashMap<String, Vec<(Option<u64>, Instant)>>>>;
 
 #[derive(Clone)]
 pub struct Store {
@@ -225,8 +231,8 @@ impl Store {
             fs::create_dir_all(parent)?;
         }
         // Record first, so the watcher already knows this content when the event arrives.
-        let previous = self.record(rel_path, Some(content_hash(text)));
-        atomic_write(&path, text.as_bytes()).inspect_err(|_| self.restore(rel_path, previous))?;
+        self.record(rel_path, Some(content_hash(text)));
+        atomic_write(&path, text.as_bytes()).inspect_err(|_| self.forget(rel_path))?;
         Ok(())
     }
 
@@ -247,9 +253,8 @@ impl Store {
     /// Delete a card file and return its text, so the delete can be undone.
     pub fn delete(&self, rel_path: &str) -> Result<String> {
         let text = self.read(rel_path)?;
-        let previous = self.record(rel_path, None);
-        fs::remove_file(self.resolve(rel_path)?)
-            .inspect_err(|_| self.restore(rel_path, previous))?;
+        self.record(rel_path, None);
+        fs::remove_file(self.resolve(rel_path)?).inspect_err(|_| self.forget(rel_path))?;
         Ok(text)
     }
 
@@ -263,13 +268,11 @@ impl Store {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
-        let previous = (
-            self.record(from, None),
-            self.record(to, Some(content_hash(&text))),
-        );
+        self.record(from, None);
+        self.record(to, Some(content_hash(&text)));
         fs::rename(source, target).inspect_err(|_| {
-            self.restore(from, previous.0);
-            self.restore(to, previous.1);
+            self.forget(from);
+            self.forget(to);
         })?;
         Ok(())
     }
@@ -317,27 +320,44 @@ impl Store {
         Watcher::start(self.clone(), on_batch)
     }
 
-    fn record(&self, rel_path: &str, hash: Option<u64>) -> Option<Option<u64>> {
+    /// Note what the store is about to do to a path.
+    fn record(&self, rel_path: &str, hash: Option<u64>) {
         let mut known = self.known.lock().unwrap();
         match hash {
             Some(_) => known.insert(rel_path.to_string()),
             None => known.remove(rel_path),
         };
-        self.own.lock().unwrap().insert(rel_path.to_string(), hash)
-    }
-
-    fn restore(&self, rel_path: &str, previous: Option<Option<u64>>) {
         let mut own = self.own.lock().unwrap();
-        match previous {
-            Some(hash) => own.insert(rel_path.to_string(), hash),
-            None => own.remove(rel_path),
-        };
+        let entries = own.entry(rel_path.to_string()).or_default();
+        // Keep only the write this one supersedes. Anything older is long settled.
+        let keep_from = entries.len().saturating_sub(1);
+        entries.drain(..keep_from);
+        entries.push((hash, Instant::now()));
     }
 
-    /// Whether the file's current state is what the store itself last wrote there.
+    /// The write just recorded did not happen. Drop it.
+    fn forget(&self, rel_path: &str) {
+        if let Some(entries) = self.own.lock().unwrap().get_mut(rel_path) {
+            entries.pop();
+        }
+    }
+
+    /// Whether the file's current state is something the store itself wrote there.
     /// `current` is the hash of the file now, or `None` if it does not exist.
     fn is_own(&self, rel_path: &str, current: Option<u64>) -> bool {
-        self.own.lock().unwrap().get(rel_path) == Some(&current)
+        let own = self.own.lock().unwrap();
+        let Some(entries) = own.get(rel_path) else {
+            return false;
+        };
+        entries.iter().enumerate().any(|(i, (hash, _))| {
+            *hash == current
+                && match entries.get(i + 1) {
+                    // The current write always counts.
+                    None => true,
+                    // A superseded one counts only while the newer write is still landing.
+                    Some((_, superseded_at)) => superseded_at.elapsed() < OWN_WRITE_GRACE,
+                }
+        })
     }
 }
 
@@ -353,6 +373,26 @@ fn read_card(path: &Path) -> std::result::Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_superseded_write_counts_as_own_only_briefly() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let (v1, v2, other) = (
+            Some(content_hash("v1")),
+            Some(content_hash("v2")),
+            Some(content_hash("agent")),
+        );
+        store.write("card.md", "v1").unwrap();
+        store.write("card.md", "v2").unwrap();
+        // The watcher may still find v1 on disk for a moment. Both are the store's own.
+        assert!(store.is_own("card.md", v2) && store.is_own("card.md", v1));
+        assert!(!store.is_own("card.md", other) && !store.is_own("card.md", None));
+        // Later, v1 on disk means another program put it back, and that must be reported.
+        std::thread::sleep(OWN_WRITE_GRACE + Duration::from_millis(50));
+        assert!(store.is_own("card.md", v2) && !store.is_own("card.md", v1));
+        assert!(!store.is_own("other.md", v1));
+    }
 
     #[test]
     fn a_failed_write_leaves_the_original_and_no_temp_file() {

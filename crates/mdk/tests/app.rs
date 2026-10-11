@@ -246,3 +246,230 @@ fn a_second_launch_signals_the_first_and_steps_aside() {
     std::fs::remove_file(dir.path().join("mdk.sock")).unwrap();
     assert!(mdk::app::single_instance(dir.path()).is_some());
 }
+
+// ---- M3: moving and creating, through the real window ---------------------------------------
+
+fn key_of(cx: &mut TestAppContext, f: &Fixture, status: Status, row: usize) -> mdk::board::CardKey {
+    cx.update(|cx| f.view.read(cx).board.column(status)[row].key.clone())
+}
+
+fn read(f: &Fixture, rel: &str) -> String {
+    fs::read_to_string(f.project.path().join(rel)).unwrap()
+}
+
+fn press(cx: &mut TestAppContext, f: &Fixture, keys: &[&str]) {
+    for key in keys {
+        cx.update_window(f.window.into(), |_, window, cx| window.press(key, cx))
+            .unwrap();
+        cx.run_until_parked();
+    }
+}
+
+fn toast(cx: &mut TestAppContext, f: &Fixture) -> Option<(String, bool)> {
+    cx.update(|cx| {
+        f.view
+            .read(cx)
+            .toast
+            .as_ref()
+            .map(|t| (t.text.clone(), t.undo))
+    })
+}
+
+/// Drag the card at (column, row) and drop it `dy` below the top of the row at `to`.
+fn drag(cx: &mut TestAppContext, f: &Fixture, from: (usize, usize), to: (usize, usize), dy: f32) {
+    cx.update_window(f.window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = |(column, row): (usize, usize)| {
+            f.view.read(cx).lists[column]
+                .bounds_for_item(row)
+                .expect("the row is on screen")
+        };
+        let (a, b) = (bounds(from), bounds(to));
+        window.drag(
+            a.center(),
+            gpui_kit::point(b.center().x, b.top() + gpui_kit::px(dy)),
+            cx,
+        );
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn dragging_a_card_to_another_column_rewrites_its_file(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    // "Fix logout" (To Do, row 1) dropped on the top edge of Review's only card.
+    drag(cx, &f, (1, 1), (3, 0), 4.);
+    assert_eq!(column(cx, &f, Status::Review), ["Fix logout", "Drag cards"]);
+    assert_eq!(column(cx, &f, Status::Todo), ["Fix login"]);
+    let text = read(&f, "backend/logout.md");
+    assert!(
+        text.contains("status: \"review\"\n") && text.contains("order: 2\n"),
+        "{text}"
+    );
+    assert_eq!(toast(cx, &f), Some(("Moved to Review".into(), true)));
+    cx.update(|cx| assert_eq!(f.view.read(cx).slot, None, "the drop slot is cleared"));
+
+    // The toast's Undo and the keyboard shortcut are the same undo.
+    let undo = if cfg!(target_os = "macos") {
+        "cmd-z"
+    } else {
+        "ctrl-z"
+    };
+    press(cx, &f, &[undo]);
+    assert_eq!(column(cx, &f, Status::Todo), ["Fix login", "Fix logout"]);
+    assert_eq!(read(&f, "backend/logout.md"), card("Fix logout", "todo", 2));
+    let redo = if cfg!(target_os = "macos") {
+        "cmd-shift-z"
+    } else {
+        "ctrl-shift-z"
+    };
+    press(cx, &f, &[redo]);
+    assert_eq!(column(cx, &f, Status::Review), ["Fix logout", "Drag cards"]);
+}
+
+#[gpui_kit::test]
+fn dropping_a_card_where_it_already_is_writes_nothing(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    let before = read(&f, "backend/login.md");
+    drag(cx, &f, (1, 0), (1, 1), 4.);
+    assert_eq!(read(&f, "backend/login.md"), before);
+    assert_eq!(toast(cx, &f), None);
+}
+
+#[gpui_kit::test]
+fn a_card_with_broken_frontmatter_cannot_be_dragged(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    let before = read(&f, "broken.md");
+    drag(cx, &f, (0, 0), (3, 0), 4.);
+    assert_eq!(column(cx, &f, Status::Backlog), ["Broken"]);
+    assert_eq!(read(&f, "broken.md"), before);
+    assert_eq!(
+        toast(cx, &f),
+        Some(("Fix the frontmatter first".into(), false))
+    );
+}
+
+#[gpui_kit::test]
+fn the_keyboard_moves_a_card_and_escape_puts_it_back(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    let original = read(&f, "backend/login.md");
+    // Down focuses the first card (Backlog's "Broken"). Right goes to To Do's first card.
+    press(cx, &f, &["down", "right"]);
+    let login = key_of(cx, &f, Status::Todo, 0);
+    cx.update(|cx| assert_eq!(f.view.read(cx).focused.as_ref(), Some(&login)));
+
+    // Space picks it up, Right moves it a column, Down and Up stay inside the column.
+    press(cx, &f, &["space", "right"]);
+    assert_eq!(column(cx, &f, Status::InProgress), ["Fix login"]);
+    press(cx, &f, &["right"]);
+    assert_eq!(column(cx, &f, Status::Review), ["Drag cards", "Fix login"]);
+    press(cx, &f, &["up"]);
+    assert_eq!(column(cx, &f, Status::Review), ["Fix login", "Drag cards"]);
+    cx.update(|cx| assert!(f.view.read(cx).grabbed.is_some()));
+
+    // Escape cancels the whole move.
+    press(cx, &f, &["escape"]);
+    assert_eq!(column(cx, &f, Status::Todo), ["Fix login", "Fix logout"]);
+    let restored = read(&f, "backend/login.md");
+    assert!(restored.contains("status: \"todo\"\n") && restored.contains("order: 1\n"));
+    // Everything after the frontmatter is as it was.
+    assert_eq!(
+        restored.split("---\n").last(),
+        original.split("---\n").last()
+    );
+    cx.update(|cx| assert!(f.view.read(cx).grabbed.is_none()));
+
+    // Space, Right, Space drops it for good.
+    press(cx, &f, &["space", "right", "space"]);
+    assert_eq!(column(cx, &f, Status::InProgress), ["Fix login"]);
+    press(cx, &f, &["escape"]);
+    assert_eq!(
+        column(cx, &f, Status::InProgress),
+        ["Fix login"],
+        "a dropped card stays"
+    );
+}
+
+#[gpui_kit::test]
+fn n_opens_the_dialog_and_quick_add_fills_the_card(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    press(cx, &f, &["n"]);
+    cx.update(|cx| assert!(f.view.read(cx).new_card.is_some()));
+    // Typing goes to the title field, and N typed there is a letter, not the shortcut.
+    cx.update_window(f.window.into(), |_, window, cx| {
+        window.input("New nav p1 #backend @dana due:2026-12-01", cx)
+    })
+    .unwrap();
+    press(cx, &f, &["enter"]);
+    cx.update(|cx| assert!(f.view.read(cx).new_card.is_none(), "the dialog closes"));
+
+    let name = format!("new-nav-{}.md", mdk::app::today());
+    let text = read(&f, &name);
+    assert!(
+        text.contains("priority: \"critical\"\nassignee: \"dana\"\ndueDate: \"2026-12-01\"\n"),
+        "{text}"
+    );
+    assert!(text.contains("labels: [\"backend\"]\n") && text.ends_with("---\n# New nav\n"));
+    assert_eq!(column(cx, &f, Status::Backlog), ["Broken", "New nav"]);
+
+    // Undo removes the file again.
+    cx.update(|cx| f.view.update(cx, |view, cx| view.undo(cx)));
+    assert!(!f.project.path().join(&name).exists());
+}
+
+#[gpui_kit::test]
+fn escape_closes_the_dialog_without_creating_anything(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    press(cx, &f, &["n"]);
+    cx.update_window(f.window.into(), |_, window, cx| {
+        window.input("Half typed", cx)
+    })
+    .unwrap();
+    press(cx, &f, &["escape"]);
+    cx.update(|cx| {
+        let view = f.view.read(cx);
+        assert!(view.new_card.is_none());
+        assert_eq!(view.board.card_count(), 5);
+    });
+    // The board has the keyboard again: N opens a fresh dialog.
+    press(cx, &f, &["n"]);
+    cx.update(|cx| assert!(f.view.read(cx).new_card.is_some()));
+}
+
+#[gpui_kit::test]
+fn archive_asks_first_and_moves_the_done_cards(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    let login = key_of(cx, &f, Status::Todo, 0);
+    cx.update(|cx| {
+        f.view.update(cx, |view, cx| {
+            view.move_card(&login, Status::Done, None, cx);
+            view.ask_archive(cx);
+        })
+    });
+    cx.update(|cx| {
+        assert!(matches!(
+            f.view.read(cx).confirm,
+            Some(mdk::app::Confirm::Archive(1))
+        ))
+    });
+    // Escape answers no.
+    press(cx, &f, &["escape"]);
+    assert!(f.project.path().join("backend/login.md").exists());
+
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.view.update(cx, |view, cx| {
+            view.ask_archive(cx);
+            view.answer_confirm(true, window, cx);
+        })
+    })
+    .unwrap();
+    assert!(!f.project.path().join("backend/login.md").exists());
+    assert!(f.project.path().join("archive/login.md").exists());
+    assert!(column(cx, &f, Status::Done).is_empty());
+    assert_eq!(
+        toast(cx, &f),
+        Some(("Archived 1 cards to archive/".into(), true))
+    );
+}

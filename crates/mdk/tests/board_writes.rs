@@ -81,13 +81,9 @@ impl Fx {
                 if path.is_dir() {
                     dirs.push(path);
                 } else {
-                    out.push(
-                        path.strip_prefix(self.dir.path())
-                            .unwrap()
-                            .to_str()
-                            .unwrap()
-                            .to_string(),
-                    );
+                    let rel = path.strip_prefix(self.dir.path()).unwrap();
+                    // Forward slashes on every OS, like the store's own paths.
+                    out.push(rel.to_str().unwrap().replace('\\', "/"));
                 }
             }
         }
