@@ -12,7 +12,7 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M5 Vim mode: built and tested, table tests for every FR-VIM-02 command, CI green on three OSes (run for `5888e2a`). The manual check in the real window is open
 - M6 preview: built and tested headless
 - M7 filters, views, list and palette: built and tested headless
-- M8: not started
+- M8 first run, agent contract, packaging: built. The release itself, the cross-OS checklist and most of the speed numbers are open
 
 ## Decisions and deviations
 
@@ -32,6 +32,274 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## What is left
+
+Everything in the spec is built except single-instance on Windows and handling the reduce-motion setting. What is missing is checking. In order of how much it matters:
+
+1. Look at it. The whole UI was built with the screen locked, so not one screen has been compared with `references/electron-board-screenshot.png`. Run `cargo run --release -p mdk`.
+2. Use it by hand on macOS: drag, the menus, the date picker, clicking links and folded callouts in the preview, Vim keys, find in card, IME input.
+3. Open the same folder in the Electron app and mdk at once (NFR-08).
+4. Run `scripts/bench.sh` for both apps and fill in the README's table (NFR-01).
+5. Try it on Windows and Linux, then push a `v0.1.0` tag to make the release (FR-PKG-01, NFR-05). Pushing the tag publishes a public release, so that is Safi's call.
+6. Single instance on Windows, and reduce motion.
+
+## Acceptance checklist
+
+65 of 98 boxes are ticked. A tick means an automated test covers it. An open box says what is missing. Nothing is ticked on the strength of the code looking right.
+
+### POC (proves the core idea, end of M3)
+- [ ] **FR-PROJ-01** Connect folder opens the native picker, and the chosen folder shows as a selected project with its cards.
+  - Open: Connecting a folder is tested. The native picker itself is not: no window.
+- [x] **FR-FILE-02** Every Electron fixture card parses to the same fields as Electron's parser.
+  - Checked: golden test, 46 fixtures
+- [x] **FR-FILE-03** Every fixture round-trips byte for byte except `modified`, and Electron reads mdk-written files identically.
+  - Checked: golden test: mdk's writer output equals Electron's byte for byte. Not yet opened in the running Electron app.
+- [x] **FR-FILE-04** A card with `sprint: 4` and `agent: "claude"` keeps both keys, verbatim, after a drag.
+  - Checked: format and board tests
+- [x] **FR-LIVE-01** A script changing a card's `status` moves it on the board within 500 ms. A 50-file git checkout gives one refresh with no freeze.
+  - Checked: store tests on three OSes and a headless app test. "No freeze" on a 50-file checkout is not observed by eye.
+- [x] **FR-MOVE-01** Dragging a card between two cards in another column lands it there, and its file gets the new status and an in-between order.
+  - Checked: headless drag test and board test
+- [x] **FR-AGENT-03** An agent edits a closed card's body, the user drags it, and the file has both the new status and the agent's body.
+  - Checked: board and editor tests
+- [x] **FR-AGENT-02** After a session of creating, moving and deleting, `git status` shows only card `.md` changes.
+  - Checked: store and board tests list the folder after a session
+
+### MVP (shippable v1, end of M8)
+Projects and folders
+- [x] **FR-PROJ-02** Two connected folders survive a restart.
+  - Checked: app test
+- [x] **FR-PROJ-03** Project counts show cards that are not done (37 cards with 10 done shows 27).
+  - Checked: board test
+- [x] **FR-PROJ-04** Project selection filters the board and survives a restart.
+  - Checked: app test
+- [x] **FR-PROJ-05** Work folders list and filter correctly, including across All projects.
+  - Checked: board test
+- [x] **FR-PROJ-06** `archive/` cards are hidden unless the archive work folder is selected.
+  - Checked: board and app tests
+- [x] **FR-PROJ-07** Remove project leaves files on disk unchanged.
+  - Checked: app test
+- [x] **FR-PROJ-08** Rescan all re-reads every project.
+  - Checked: every app test starts with a rescan of all projects
+- [x] **FR-PROJ-09** A renamed or moved folder shows "Folder not found" with Locate folder, and relocating restores it.
+  - Checked: board test. The sidebar's "Folder not found" row is not seen by eye.
+
+Card files
+- [x] **FR-FILE-01** Scanning follows the depth 4 and skip rules, and every `.md` is a card.
+  - Checked: store test
+- [x] **FR-FILE-05** Broken YAML shows a card with a warning. Dragging it is blocked with a toast, and the file is never rewritten by board actions.
+  - Checked: board, app and editor tests
+- [x] **FR-FILE-06** New files are `<slug>-YYYY-MM-DD.md` in the right folder, with `-2` on a clash.
+  - Checked: board test
+- [x] **FR-FILE-07** Writes are atomic (temp file plus rename). A test kills the write midway and the original is intact.
+  - Checked: store test with a simulated crash before the rename
+- [x] **FR-FILE-08** UTF-8 with BOM is read. CRLF files stay CRLF after a save.
+  - Checked: format tests
+- [x] **FR-FILE-09** Paths that leave the root (`..`, symlinks out) are refused. Non-image files can't be read as images.
+  - Checked: store tests, including symlinks
+
+Board and cards
+- [x] **FR-BOARD-01** Five columns with Electron's names and colours.
+  - Checked: names and colours are constants in `mdk-format`. The look is not checked.
+- [ ] **FR-BOARD-02** Column header shows dot, name, count and "+", plus "+ Add card" at the bottom.
+  - Open: Built. Not seen by eye.
+- [x] **FR-BOARD-03** Cards are sorted by `order`.
+  - Checked: board test
+- [ ] **FR-BOARD-04** Horizontal board scroll, per-column vertical scroll, and no vertical overscroll of the board.
+  - Open: Built (sideways board scroll, one list per column). Scrolling is not checked by hand.
+- [x] **FR-BOARD-05** Archive moves all visible done cards into `archive/` after a confirm with the count.
+  - Checked: board and app tests
+- [ ] **FR-BOARD-06** A 1,000-card project scrolls and drags without frames over 33 ms.
+  - Open: Frame times on 1,000 cards are not measured. Scan (31 ms) and filtering (0.3 ms) are, in a release build.
+- [ ] **FR-CARD-01** The card face matches the Electron screenshot for the same files.
+  - Open: Built from Electron's template. The side-by-side comparison with the screenshot is not done.
+- [x] **FR-CARD-02** Clicking a card opens the editor sheet.
+  - Checked: app test
+- [ ] **FR-CARD-03** The "⋯" menu moves the card to the end of the chosen column, with the current column disabled.
+  - Open: Moving to the end of a column is tested. The menu itself has not been clicked.
+- [ ] **FR-CARD-04** Cards with broken frontmatter show a warning with the error on hover.
+  - Open: The warning icon and tooltip are built. Hover is not checked.
+
+Moving
+- [x] **FR-MOVE-02** A move changes only `status`, `order` and `modified`, and colliding orders renumber the column.
+  - Checked: board tests
+- [x] **FR-MOVE-03** The "Moved to X" toast's Undo within 5 s restores the status and order.
+  - Checked: app test for the toast and its Undo. The 5-second timeout is not timed.
+- [x] **FR-MOVE-04** Keyboard moving with Space, arrows, Space and Esc works, Esc restores the original place, and the hint shows.
+  - Checked: app test
+- [x] **FR-MOVE-05** ⌘Z and ⌘⇧Z undo and redo a move, create, delete and archive. Undo of delete restores the exact bytes.
+  - Checked: board and app tests
+
+Creating
+- [x] **FR-NEW-01** New card opens from the header, `N`, column "+" and "+ Add card", with the right default status and work folder.
+  - Checked: `N` is tested. The header button, "+" and "+ Add card" call the same function.
+- [x] **FR-NEW-02** `Fix login p1 #backend @safi due:friday` on 2026-10-11 gives "Fix login", critical, #backend, @safi, due 2026-10-16, and the hint line shows it.
+  - Checked: format test for the Sunday example, app test for the dialog
+- [x] **FR-NEW-03** The bug, feature and chore templates fill priority, labels and body like Electron.
+  - Checked: format test. The three buttons have not been clicked.
+- [x] **FR-NEW-04** The created card's file exists and the card shows at once.
+  - Checked: app test
+- [ ] **FR-NEW-05** The dialog closes on Cancel, Esc and a backdrop press-and-release, but not when drag-selecting out of it.
+  - Open: Esc is tested. Cancel, the backdrop click and the drag-select case are not.
+
+Card editor
+- [ ] **FR-EDIT-01** The sheet shows path, title, field grid with date picker, and labels. Expand works.
+  - Open: Built. Not seen by eye. Expand is not tested.
+- [x] **FR-EDIT-02** Typing then closing within 100 ms saves to the file.
+  - Checked: editor test
+- [x] **FR-EDIT-03** Renaming the title updates the body's first `# ` heading.
+  - Checked: editor test, both directions
+- [ ] **FR-EDIT-04** Markdown and Preview tabs, with the last tab remembered.
+  - Open: Built, and the tab is in the config file. Restoring it is not tested.
+- [x] **FR-EDIT-05** Copy AI prompt puts Electron's prompt text on the clipboard and shows "Copied".
+  - Checked: the prompt text is tested. The clipboard and the toast are not.
+- [x] **FR-EDIT-06** Delete confirms, removes the file and closes, and is undoable.
+  - Checked: editor test
+- [ ] **FR-EDIT-07** The raw file view shows the exact text that will be written.
+  - Open: Built. Not tested.
+- [x] **FR-EDIT-08** With unsaved typing, an external change shows "Changed on disk" with Keep mine and Load theirs. When clean, it reloads within 500 ms.
+  - Checked: editor tests
+- [x] **FR-EDIT-09** An external delete shows "This file was deleted" with Recreate and Close.
+  - Checked: editor test
+- [x] **FR-EDIT-10** The sheet closes on X, Esc (not in Vim mode) and backdrop press-and-release.
+  - Checked: Esc is tested, with Vim off and on. X and the backdrop are not.
+
+Markdown editor
+- [ ] **FR-MDE-01** Markdown highlighting, wrapping, active line, selection matches and placeholder, in both themes.
+  - Open: Uses gpui-kit's editor with the markdown grammar. Not seen by eye. Headings are bold and coloured, not bigger (amended in M0).
+- [x] **FR-MDE-02** All 20 toolbar actions behave like Electron's, and the ported `md-commands.check.ts` cases pass.
+  - Checked: all 24 ported cases pass, plus editor tests
+- [ ] **FR-MDE-03** ⌘B, ⌘I, ⌘E, ⌘F, undo and redo, Tab and Shift-Tab, and list continuation on Enter.
+  - Open: Bold, undo and list continuation are tested. Italic and code share bold's path. Find, Tab and Shift-Tab are the kit's own and are not tested here.
+- [ ] **FR-MDE-04** Selection, clipboard, word and line navigation, and IME input (tested with a Japanese or Arabic input method).
+  - Open: The kit's editor. IME input is not tested.
+
+Vim
+- [x] **FR-VIM-01** The sidebar Vim switch toggles Vim in the editor and persists.
+  - Checked: app tests
+- [x] **FR-VIM-02** Every command in the FR-VIM-02 list passes the table test, and the mode line shows the mode.
+  - Checked: table test, about 150 cases
+- [x] **FR-VIM-03** Esc in Vim mode never closes the sheet.
+  - Checked: editor test
+
+Preview
+- [ ] **FR-PREV-01** GFM renders: tables (scroll when wide), task lists, footnotes, strikethrough, blockquotes, rules and code.
+  - Open: gpui-kit's own GitHub-flavoured markdown. Not seen by eye.
+- [x] **FR-PREV-02** The Subtasks box ticks the right `- [ ]` line in the file, and the card face count updates.
+  - Checked: editor test
+- [x] **FR-PREV-03** Code blocks are highlighted, with a language or title header and a working Copy.
+  - Checked: the header is seen to draw, and titles are tested. Copy has not been clicked.
+- [x] **FR-PREV-04** `$x^2$` and `$$\int$$` render as maths, "costs $5 a month, or $50" stays text, and a bad formula shows red source.
+  - Checked: guard tested, a formula and a bad formula are seen to draw
+- [ ] **FR-PREV-05** A Mermaid flowchart renders in theme colours, and a broken one shows source and error.
+  - Open: A flowchart and a broken diagram's error are seen to draw. It uses the renderer's stock themes, not mdk's colours.
+- [ ] **FR-PREV-06** GitHub and Obsidian callouts render in five looks, and `-` and `+` folding works.
+  - Open: Types, titles and fold markers are tested, and open and folded callouts draw. Clicking to fold is not tested.
+- [x] **FR-PREV-07** `==highlight==` renders, and `%% comments %%` are hidden in the preview and on the card face but kept in the file.
+  - Checked: format and source tests, and the highlight is seen to draw
+- [ ] **FR-PREV-08** External links open in the browser, card links and wikilinks open the card, links outside the project are plain text, and unresolved wikilinks are dimmed.
+  - Open: Resolution and the dimmed look are tested. Clicking a link has not been tried.
+- [x] **FR-PREV-09** Local images and `![[img|300]]` render, missing ones show a named box, and remote images don't load.
+  - Checked: local, missing and remote images are each seen to draw
+- [x] **FR-PREV-10** Raw HTML shows as text, and `<br>` breaks the line.
+  - Checked: source tests
+
+Filters, list and palette
+- [x] **FR-FILT-01** Search, priority chips, assignee, label and due filters work alone and combined, and reset clears them.
+  - Checked: board and app tests
+- [x] **FR-FILT-02** Save view, apply view and delete view work per project and persist.
+  - Checked: app test
+- [x] **FR-FILT-03** Board and List switch, list rows open cards, and the choice persists.
+  - Checked: app test
+- [x] **FR-PAL-01** ⌘K searches cards, Enter opens one, "Create card ..." creates, "Move open card to ..." moves, and Esc closes.
+  - Checked: app tests
+
+Live updates
+- [x] **FR-LIVE-02** mdk's own saves don't trigger a reload or a clash banner.
+  - Checked: store tests on three OSes
+- [ ] **FR-LIVE-03** The Auto-refresh switch pauses and resumes updates and persists, and "checked" shows the time.
+  - Open: Built. The pause is not tested.
+- [x] **FR-LIVE-04** A new subfolder created by an agent is picked up and watched.
+  - Checked: store test
+
+App shell
+- [ ] **FR-APP-01** The header matches Electron's, with the "mdk" name.
+  - Open: Built. Not seen by eye.
+- [ ] **FR-APP-02** Dark (default), light and system themes, matching Electron's colours, and the choice persists.
+  - Open: Colours converted from Electron's CSS, and the choice persists (tested). The match is not checked by eye.
+- [x] **FR-APP-03** Every pref in Stage 5's Prefs table survives a restart.
+  - Checked: prefs and app tests
+- [ ] **FR-APP-04** Window size, position and maximised state are restored.
+  - Open: Built. Not tested: a headless window has no real position.
+- [x] **FR-APP-05** `N`, ⌘K, Esc, ⌘Z, ⌘⇧Z and ⌘, work (Ctrl on Windows and Linux).
+  - Checked: app tests, with Cmd on macOS and Ctrl on Windows and Linux in CI
+- [ ] **FR-APP-06** Native macOS menu, and in-window menu on Windows and Linux, with the main commands.
+  - Open: Built. A headless window has no menus, so neither kind has been seen.
+- [ ] **FR-APP-08** A second launch focuses the existing window.
+  - Open: Tested on macOS and Linux. Windows has no check yet.
+
+First run
+- [x] **FR-FIRST-01** With no projects, the welcome state shows Connect folder and Create sample project.
+  - Checked: app test
+- [x] **FR-FIRST-02** Create sample project writes `mdk-sample/` with cards in all five columns covering every preview feature, and connects it.
+  - Checked: app test
+- [x] **FR-FIRST-03** No matching cards shows "No cards match" with Create first card.
+  - Checked: app test
+
+Agent contract and release
+- [x] **FR-AGENT-01** `AGENTS.md` and `skills/mdk/SKILL.md` ship in the repo, and the Electron format rules hold unchanged.
+  - Checked: both files are in the repo
+- [ ] **FR-PKG-01** A `v*` tag builds a dmg, an NSIS exe and an AppImage on a GitHub release, and each installs and runs.
+  - Open: No tag has been pushed. Locally the macOS `.app` builds. The `.dmg` step failed on its Finder script because the screen was locked.
+- [ ] **FR-PKG-02** The README covers install, unsigned-app steps, the file format, agents and the before and after numbers.
+  - Open: Everything is in the README except three of the four speed numbers.
+
+Non-functional
+- [ ] **NFR-01** mdk beats Electron on download size, cold start, idle memory and edit-to-screen time (numbers in the README). Filter typing updates within 100 ms on 1,000 cards.
+  - Open: Size is measured: 28 MB against 603 MB, about 12 MB compressed against 196 MB. Cold start, idle memory at 10 minutes and edit-to-screen time are not measured for either app.
+- [ ] **NFR-02** No network crates in `Cargo.lock` (cargo-deny ban passes). No requests made (checked with Little Snitch or an equivalent).
+  - Open: `cargo-deny` bans pass in CI. No traffic check has been run.
+- [ ] **NFR-03** Every feature works with networking turned off.
+  - Open: Not checked by hand. There is no network code to fail.
+- [ ] **NFR-04** A generated 20-project, 5,000-card setup loads and stays usable; a 1 MB card and a 20 MB image open.
+  - Open: 1,000 cards are tested. 20 projects, 5,000 cards, a 1 MB card and a 20 MB image are not.
+- [ ] **NFR-05** The release checklist passes on macOS 13+, Windows 11 and Ubuntu 22.04.
+  - Open: Not started. It needs the three machines.
+- [ ] **NFR-06** All UI is keyboard reachable with visible focus, the contrast script passes both themes (4.5:1 text, 3:1 UI), and reduce motion is respected.
+  - Open: The contrast test passes for both themes. Keyboard reach is partly tested. The reduce-motion setting is not handled: mdk has no animations of its own, but gpui-kit's are not switched off.
+- [x] **NFR-07** No test or manual run ever leaves a truncated or corrupted card; files mdk can't parse are never rewritten by board actions.
+  - Checked: store, board and editor tests
+- [ ] **NFR-08** Electron and mdk open the same folder at once, editing in both, with no corruption.
+  - Open: Not run side by side. The format is byte-compatible by test.
+- [x] **NFR-09** `mdk-format`, `mdk-store`, `mdk-markdown` and `mdk-vim` build and test with no dependency on the `mdk` app crate.
+  - Checked: the four crates build and test alone in CI
+- [x] **NFR-10** `cargo-deny` licence check passes, and `THIRD_PARTY_LICENSES.html` is bundled.
+  - Checked: `cargo-deny` passes in CI, and the notices file is generated and bundled in the local `.app`
+
+## M8 notes
+
+Built: the sample project (seven cards over all five columns and three work folders, embedded in the binary, written by "Create sample project" with a copy of `AGENTS.md`), `AGENTS.md` and `skills/mdk/SKILL.md`, a log file, `Packager.toml`, the release workflow, the licence notices, `scripts/bench.sh`, a contrast test and a scale test.
+
+Checked:
+
+- The sample project fills all five columns, parses with no errors, and creating it twice overwrites nothing (app test).
+- `cargo packager --release -c Packager.toml --formats app` builds `dist/mdk.app` on this Mac: 28 MB with the licence notices, bundle id `com.abdulkadersafi.mdk`, minimum macOS 13.0. The release binary starts, scans both task folders in the Electron repo (35 cards) and writes `mdk.log`.
+- `cargo about` generates the notices: 12 licence kinds, none of them GPL.
+- The contrast test reads the shipped theme file. It failed at first: the card's file path and the sidebar's "checked" time were at 70% opacity (as in Electron) and fell below 4.5:1 in both themes, and two light-theme badge colours were short. All four are fixed.
+- On 1,000 cards in a release build, a scan takes 31 ms and a filter keystroke 0.3 ms.
+
+Not checked: the `.dmg` (its Finder styling script timed out because the screen was locked), the NSIS installer, the AppImage, the release workflow (it only runs on a tag), and `scripts/bench.sh` end to end.
+
+Decisions and deviations:
+
+- The agent skill is not a straight copy. Electron's table of what the preview renders names features mdk does not have (line highlights, diff markers, HTML tags), so the table is rewritten to what mdk renders.
+- `AGENTS.md` gains two lines: agents may add their own keys, and frontmatter must stay valid YAML.
+- The contrast check is a Rust test, not a script, so it runs in CI.
+- `AGENTS.md` in the sample folder is a card, because every `.md` file is (FR-FILE-01). It lands in Backlog.
+- The log uses `env_logger` writing to the file. Rotation happens at start, not while running.
+- `THIRD_PARTY_LICENSES.html` is generated and not committed. Packaging needs it to exist.
+- `![[image.png]]` also looks at the project root, as Electron does.
 
 ## M7 notes
 

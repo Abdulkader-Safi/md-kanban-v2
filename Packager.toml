@@ -1,0 +1,30 @@
+# cargo-packager config: macOS .app and .dmg, Windows NSIS installer, Linux AppImage.
+# Run `cargo packager --release` on the OS you are packaging for. Builds are unsigned.
+name = "mdk"
+product-name = "mdk"
+version = "0.1.0"
+identifier = "com.abdulkadersafi.mdk"
+description = "The native MD Kanban: a kanban board over a folder of markdown cards."
+authors = ["Abdulkader Safi"]
+homepage = "https://github.com/Abdulkader-Safi/md-kanban-v2"
+license-file = "LICENSE"
+copyright = "Copyright (c) 2026 Abdulkader Safi"
+category = "DeveloperTool"
+before-packaging-command = "cargo build --release -p mdk"
+out-dir = "dist"
+binaries-dir = "target/release"
+binaries = [{ path = "mdk", main = true }]
+icons = [
+    "crates/mdk/assets/app/icon.icns",
+    "crates/mdk/assets/app/icon.ico",
+    "crates/mdk/assets/app/icon.png",
+]
+# THIRD_PARTY_LICENSES.html is generated: see the README, "Build a release".
+resources = ["AGENTS.md", "LICENSE", "THIRD_PARTY_LICENSES.html"]
+
+[macos]
+minimum-system-version = "13.0"
+
+[nsis]
+# Per-user install: no administrator rights needed.
+installer-mode = "currentUser"

@@ -81,7 +81,7 @@ impl Mdk {
                     false => d.hover(|s| s.bg(c.secondary)),
                 })
                 .child(div().flex_1().truncate().child(label))
-                .child(div().text_size(px(11.)).opacity(0.7).child(hint))
+                .child(div().text_size(px(11.)).child(hint))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.run_palette_item(item.clone(), window, cx)
                 }))

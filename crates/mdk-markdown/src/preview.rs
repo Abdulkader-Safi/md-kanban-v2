@@ -384,11 +384,15 @@ impl MarkdownPlugin for Images {
                 .child(format!("{label} ({})", picture.url))
                 .into_any_element();
         }
-        // Only image files, and only inside the project folder.
-        let file = resolve_path(&self.context.page_path, &picture.url)
-            .filter(|path| is_image(path))
-            .map(|path| self.context.root.join(path))
-            .filter(|file| file.is_file());
+        // Only image files, and only inside the project folder: next to the card first,
+        // then at the project root, which is where `![[name.png]]` often means.
+        let inside = |page: &str| {
+            resolve_path(page, &picture.url)
+                .filter(|path| is_image(path))
+                .map(|path| self.context.root.join(path))
+                .filter(|file| file.is_file())
+        };
+        let file = inside(&self.context.page_path).or_else(|| inside(""));
         match file {
             Some(file) => {
                 drew("image-local");

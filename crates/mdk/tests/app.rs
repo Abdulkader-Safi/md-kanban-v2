@@ -751,3 +751,59 @@ fn palette_keys_and_the_settings_shortcut(cx: &mut TestAppContext) {
     press(cx, &f, &["down", "enter"]);
     cx.update(|cx| assert_eq!(f.view.read(cx).prefs.view, ViewChoice::List));
 }
+
+// ---- M8: the sample project ------------------------------------------------------------------
+
+#[gpui_kit::test]
+fn the_sample_project_fills_all_five_columns(cx: &mut TestAppContext) {
+    let f = open(cx, false, |_| Prefs::default());
+    let parent = tempfile::tempdir().unwrap();
+    let dir = parent.path().to_path_buf();
+    cx.update(|cx| {
+        f.view
+            .update(cx, |view, cx| view.create_sample_in(&dir, cx))
+    });
+    settle(cx, &f);
+
+    let root = parent.path().join("mdk-sample");
+    assert!(root.join("AGENTS.md").is_file());
+    for status in Status::ALL {
+        assert!(
+            !column(cx, &f, status).is_empty(),
+            "{} is empty",
+            status.name()
+        );
+    }
+    cx.update(|cx| {
+        let view = f.view.read(cx);
+        // Seven cards, plus AGENTS.md, which is a card too because every .md file is.
+        assert_eq!(view.board.card_count(), 8);
+        assert_eq!(view.board.projects[0].name, "mdk-sample");
+        assert_eq!(
+            view.board.workspaces(),
+            ["getting-started", "ideas", "writing"]
+        );
+        for card in view.board.visible_cards() {
+            assert_eq!(card.error(), None, "{}", card.key.rel_path);
+        }
+        // The showcase card has subtasks, labels, and the title mdk expects.
+        let showcase = view
+            .board
+            .visible_cards()
+            .into_iter()
+            .find(|c| c.data.title == "Preview showcase")
+            .unwrap();
+        assert_eq!((showcase.subtasks, showcase.data.labels.len()), ((1, 2), 2));
+    });
+
+    // Creating it again in the same place overwrites nothing and adds no second project.
+    let edited = root.join("ideas/try-the-keyboard-2026-10-11.md");
+    fs::write(&edited, "# Mine now\n").unwrap();
+    cx.update(|cx| {
+        f.view
+            .update(cx, |view, cx| view.create_sample_in(&dir, cx))
+    });
+    settle(cx, &f);
+    assert_eq!(fs::read_to_string(&edited).unwrap(), "# Mine now\n");
+    cx.update(|cx| assert_eq!(f.view.read(cx).board.projects.len(), 1));
+}

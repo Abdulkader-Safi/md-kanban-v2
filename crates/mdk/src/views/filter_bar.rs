@@ -104,7 +104,7 @@ impl Mdk {
 
         let chips = Priority::ALL.into_iter().enumerate().map(|(n, priority)| {
             let on = filters.priorities.contains(&priority);
-            let (fg, bg) = priority_colors(priority);
+            let (fg, bg) = priority_colors(priority, c.dark);
             div()
                 .id(("priority-chip", n))
                 .px_2()

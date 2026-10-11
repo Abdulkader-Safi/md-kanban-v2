@@ -21,7 +21,7 @@ use crate::board::Command;
 use crate::prefs::ViewChoice;
 use crate::theme::icon;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use mdk_format::Status;
@@ -43,6 +43,8 @@ pub(crate) struct Colors {
     pub accent: Hsla,
     pub accent_fg: Hsla,
     pub danger: Hsla,
+    /// The dark theme is on.
+    pub dark: bool,
 }
 
 impl Colors {
@@ -62,6 +64,7 @@ impl Colors {
             accent: t.sidebar_accent,
             accent_fg: t.sidebar_accent_foreground,
             danger: t.danger,
+            dark: t.is_dark(),
         }
     }
 }
@@ -406,13 +409,12 @@ impl Mdk {
                             .label("Connect a folder")
                             .on_click(cx.listener(|this, _, _, cx| this.connect_folder(cx))),
                     )
-                    // The sample project arrives in M8.
                     .child(
                         Button::new("welcome-sample")
                             .outline()
                             .small()
                             .label("Create sample project")
-                            .disabled(true),
+                            .on_click(cx.listener(|this, _, _, cx| this.create_sample(cx))),
                     ),
             )
     }

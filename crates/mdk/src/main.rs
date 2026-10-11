@@ -4,6 +4,7 @@ use mdk::prefs::{Prefs, config_dir};
 
 fn main() {
     let dir = config_dir();
+    mdk::logging::init(&dir);
     let Some(instance) = mdk::app::single_instance(&dir) else {
         // Another mdk is running and has been asked to come to the front.
         return;

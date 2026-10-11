@@ -3,7 +3,7 @@
 use super::Colors;
 use crate::app::{DragCard, Mdk, today};
 use crate::board::{Card, CardKey};
-use crate::theme::{AMBER, RED, icon, priority_colors};
+use crate::theme::{due_colors, icon, priority_colors};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
@@ -87,7 +87,8 @@ fn card_face(
     c: Colors,
 ) -> Stateful<Div> {
     let data = &card.data;
-    let (priority_fg, priority_bg) = priority_colors(data.priority);
+    let (priority_fg, priority_bg) = priority_colors(data.priority, c.dark);
+    let (red, amber) = due_colors(c.dark);
     // CSS collapses line breaks in the excerpt. Do the same.
     let excerpt = card
         .excerpt
@@ -97,8 +98,8 @@ fn card_face(
     let due = data.due_date.as_ref().map(|due| {
         let (label, tone) = format_due(due, today);
         let chip = match tone {
-            Tone::Red => chip(c).bg(rgb(RED).opacity(0.15)).text_color(rgb(RED)),
-            Tone::Amber => chip(c).bg(rgb(AMBER).opacity(0.15)).text_color(rgb(AMBER)),
+            Tone::Red => chip(c).bg(rgb(red).opacity(0.15)).text_color(rgb(red)),
+            Tone::Amber => chip(c).bg(rgb(amber).opacity(0.15)).text_color(rgb(amber)),
             Tone::Muted => chip(c).text_color(c.fg),
         };
         chip.child(format!("{label} · {due}"))
@@ -144,7 +145,7 @@ fn card_face(
                     d.child(
                         div()
                             .id("card-error")
-                            .child(icon("alert-triangle").size_4().text_color(rgb(AMBER)))
+                            .child(icon("alert-triangle").size_4().text_color(rgb(amber)))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(format!("Frontmatter error: {error}"))
                                     .build(window, cx)
@@ -258,7 +259,7 @@ fn card_face(
                 .mt_1p5()
                 .font_family(mono)
                 .text_size(px(10.))
-                .text_color(c.muted_fg.opacity(0.7))
+                .text_color(c.muted_fg)
                 .child(card.key.rel_path.clone()),
         )
         .when(state.grabbed, |d| {

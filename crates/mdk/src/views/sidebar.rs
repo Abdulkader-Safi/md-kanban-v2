@@ -238,7 +238,7 @@ impl Mdk {
                         div()
                             .font_family(mono)
                             .text_size(px(10.))
-                            .text_color(c.muted_fg.opacity(0.7))
+                            .text_color(c.muted_fg)
                             .child(format!(
                                 "checked {}",
                                 self.last_check.as_deref().unwrap_or("never")

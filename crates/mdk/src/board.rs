@@ -125,6 +125,36 @@ fn status_for(root: &Path, error: &StoreError) -> ProjectStatus {
     }
 }
 
+/// The sample project's files, embedded in the app.
+macro_rules! sample {
+    ($($path:literal),* $(,)?) => {
+        [$(($path, include_str!(concat!("../assets/sample/", $path)))),*]
+    };
+}
+
+const SAMPLE: [(&str, &str); 8] = {
+    let cards = sample![
+        "getting-started/open-mdk-2026-10-11.md",
+        "getting-started/move-a-card-2026-10-11.md",
+        "getting-started/hand-a-card-to-your-agent-2026-10-11.md",
+        "getting-started/connect-your-own-folder-2026-10-11.md",
+        "writing/preview-showcase-2026-10-11.md",
+        "writing/quick-add-syntax-2026-10-11.md",
+        "ideas/try-the-keyboard-2026-10-11.md",
+    ];
+    [
+        cards[0],
+        cards[1],
+        cards[2],
+        cards[3],
+        cards[4],
+        cards[5],
+        cards[6],
+        // The agent contract, so the sample folder is ready to hand to an agent.
+        ("AGENTS.md", include_str!("../../../AGENTS.md")),
+    ]
+};
+
 /// A random 8-character base36 id, like Electron's.
 fn new_id(seed: &Path) -> ProjectId {
     let mut hasher = DefaultHasher::new();
@@ -368,6 +398,7 @@ impl Board {
                     |n| n.to_string_lossy().into(),
                 );
                 let id = new_id(&root);
+                log::info!("connected {}", root.display());
                 self.add_project(id.clone(), name, root);
                 id
             }
@@ -376,8 +407,27 @@ impl Board {
         Ok(id)
     }
 
+    /// Write the sample project into `parent/mdk-sample` and connect it. Files that are
+    /// already there are left alone, so running this twice never overwrites anything.
+    /// The caller then scans.
+    pub fn create_sample_project(&mut self, parent: &Path) -> Result<ProjectId, String> {
+        let root = parent.join("mdk-sample");
+        std::fs::create_dir_all(&root)
+            .map_err(|e| format!("Can't create {}: {e}", root.display()))?;
+        let store = Store::open(&root).map_err(|e| e.to_string())?;
+        for (rel_path, text) in SAMPLE {
+            if store.read(rel_path).is_err() {
+                store.write(rel_path, text).map_err(|e| e.to_string())?;
+            }
+        }
+        self.connect_project(&root)
+    }
+
     /// Forget a project. Its files are not touched.
     pub fn remove_project(&mut self, id: &str) {
+        if let Some(project) = self.project(id) {
+            log::info!("removed {}", project.root.display());
+        }
         self.projects.retain(|p| p.id != id);
         self.cards.retain(|key, _| key.project != id);
         if self.selected_project.as_deref() == Some(id) {
@@ -421,6 +471,12 @@ impl Board {
         project.loading = false;
         match scan {
             Ok(files) => {
+                log::info!("scanned {}: {} cards", project.root.display(), files.len());
+                for file in &files {
+                    if let Err(why) = &file.content {
+                        log::warn!("{}: {why}", file.rel_path);
+                    }
+                }
                 project.status = ProjectStatus::Ok;
                 self.cards.retain(|key, _| key.project != id);
                 for file in files {
@@ -429,6 +485,7 @@ impl Board {
                 }
             }
             Err(error) => {
+                log::warn!("scan of {} failed: {error}", project.root.display());
                 project.status = status_for(&project.root, &error);
                 project.store = None;
             }
@@ -473,8 +530,8 @@ impl Board {
                         project.store = None;
                     }
                 }
-                // ponytail: watcher errors are dropped until logging lands. The next rescan recovers.
-                StoreEvent::Error { .. } => {}
+                // Logged only. The next rescan recovers.
+                StoreEvent::Error { message } => log::warn!("watcher: {message}"),
             }
         }
         rescan

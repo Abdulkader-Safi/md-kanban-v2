@@ -1,0 +1,47 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            format: dmg
+            artifact: dist/*.dmg
+          - os: windows-latest
+            format: nsis
+            artifact: dist/*-setup.exe
+          - os: ubuntu-22.04
+            format: appimage
+            artifact: dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: GPUI system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libwayland-dev libfontconfig1-dev libfreetype6-dev libfuse2
+      - name: Packaging tools
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          cargo install cargo-about --locked --features cli
+      # The notices file is listed in Packager.toml, so it must exist before packaging.
+      - name: Third-party licences
+        run: cargo about generate -m crates/mdk/Cargo.toml about.hbs -o THIRD_PARTY_LICENSES.html
+      - name: Package
+        run: cargo packager --release -c Packager.toml --formats ${{ matrix.format }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
+          generate_release_notes: true

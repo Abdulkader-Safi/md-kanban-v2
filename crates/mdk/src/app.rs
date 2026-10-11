@@ -586,6 +586,24 @@ impl Mdk {
         self.pick_folder("Connect", cx, |this, path, cx| this.connect(path, cx));
     }
 
+    /// Ask where to put the sample project, write it there and connect it.
+    pub fn create_sample(&mut self, cx: &mut Context<Self>) {
+        self.pick_folder("Create here", cx, |this, path, cx| {
+            this.create_sample_in(path, cx)
+        });
+    }
+
+    pub fn create_sample_in(&mut self, parent: &Path, cx: &mut Context<Self>) {
+        match self.board.create_sample_project(parent) {
+            Ok(id) => {
+                self.notice = None;
+                self.rescan(&id, cx);
+            }
+            Err(error) => self.notice = Some(error),
+        }
+        self.selection_changed(cx);
+    }
+
     pub fn connect(&mut self, path: &Path, cx: &mut Context<Self>) {
         match self.board.connect_project(path) {
             Ok(id) => {
@@ -730,6 +748,7 @@ impl Mdk {
         let value = match result {
             Ok(value) => Some(value),
             Err(error) => {
+                log::warn!("action failed: {error}");
                 self.show_toast(error, false, cx);
                 None
             }

@@ -114,17 +114,28 @@ pub fn apply(choice: ThemeChoice, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Badge colours for a priority: (text, background).
-pub fn priority_colors(priority: Priority) -> (Hsla, Hsla) {
-    let base: Hsla = rgb(match priority {
-        Priority::Critical => 0xef4444,
-        Priority::High => 0xf97316,
-        Priority::Medium => 0x3b82f6,
-        Priority::Low => 0x9ca3af,
-    })
-    .into();
-    (base, base.opacity(0.15))
+/// Badge colours for a priority: (text, background). The light theme uses darker
+/// shades, so the text keeps a 4.5:1 contrast on the tinted badge.
+pub fn priority_colors(priority: Priority, dark: bool) -> (Hsla, Hsla) {
+    let text = match (priority, dark) {
+        (Priority::Critical, true) => 0xf87171,
+        (Priority::High, true) => 0xfb923c,
+        (Priority::Medium, true) => 0x60a5fa,
+        (Priority::Low, true) => 0x9ca3af,
+        (Priority::Critical, false) => 0xb91c1c,
+        (Priority::High, false) => 0x9a3412,
+        (Priority::Medium, false) => 0x1d4ed8,
+        (Priority::Low, false) => 0x4b5563,
+    };
+    let text: Hsla = rgb(text).into();
+    (text, text.opacity(0.15))
 }
 
-pub const RED: u32 = 0xef4444;
-pub const AMBER: u32 = 0xf59e0b;
+/// The overdue and due-today colours, as text on a 15% tint of themselves.
+pub fn due_colors(dark: bool) -> (u32, u32) {
+    if dark {
+        (0xf87171, 0xfbbf24)
+    } else {
+        (0xb91c1c, 0x92400e)
+    }
+}
