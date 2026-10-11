@@ -554,6 +554,33 @@ impl Board {
         Ok(())
     }
 
+    /// Replace a card file's whole text. This is how a file with broken frontmatter gets
+    /// fixed: by hand, in the editor. A file that is gone is created again.
+    pub fn write_raw(&mut self, key: &CardKey, text: &str) -> Result<(), String> {
+        let store = self.store_for(key)?;
+        let before = store.read(&key.rel_path).ok();
+        if before.as_deref() == Some(text) {
+            return Ok(());
+        }
+        store
+            .write(&key.rel_path, text)
+            .map_err(|e| e.to_string())?;
+        self.reload(key, Some(text));
+        let title = self
+            .card(key)
+            .map_or_else(String::new, |c| c.data.title.clone());
+        let verb = if before.is_some() { "Edit" } else { "Recreate" };
+        self.record(
+            format!("{verb} {title}"),
+            vec![FileOp::Change {
+                key: key.clone(),
+                before,
+                after: Some(text.to_string()),
+            }],
+        );
+        Ok(())
+    }
+
     /// The done cards on show that are not archived yet.
     pub fn archivable(&self) -> Vec<CardKey> {
         self.column(Status::Done)

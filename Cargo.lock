@@ -4023,6 +4023,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "mdk-format",
+ "mdk-markdown",
  "mdk-store",
  "serde",
  "serde_json",

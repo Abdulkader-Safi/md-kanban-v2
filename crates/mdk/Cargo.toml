@@ -6,8 +6,9 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-gpui-kit.workspace = true
+gpui-kit = { workspace = true, features = ["tree-sitter-markdown", "tree-sitter-markdown-inline"] }
 mdk-format = { path = "../mdk-format" }
+mdk-markdown = { path = "../mdk-markdown" }
 mdk-store = { path = "../mdk-store" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 directories = "=6.0.0"

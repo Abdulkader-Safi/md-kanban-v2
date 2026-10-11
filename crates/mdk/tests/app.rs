@@ -222,7 +222,11 @@ fn an_edit_by_another_program_moves_the_card(cx: &mut TestAppContext) {
 fn opening_a_card_shows_the_sheet_and_escape_closes_it(cx: &mut TestAppContext) {
     let f = open(cx, false, connected);
     let key = cx.update(|cx| f.view.read(cx).board.column(Status::Review)[0].key.clone());
-    cx.update(|cx| f.view.update(cx, |view, cx| view.open(key.clone(), cx)));
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.view
+            .update(cx, |view, cx| view.open(key.clone(), window, cx))
+    })
+    .unwrap();
     settle(cx, &f);
     cx.update(|cx| assert_eq!(f.view.read(cx).open_card.as_ref(), Some(&key)));
     cx.update_window(f.window.into(), |_, window, cx| window.press("escape", cx))

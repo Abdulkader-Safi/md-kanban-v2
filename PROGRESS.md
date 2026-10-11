@@ -7,8 +7,9 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M0 de-risk: spikes done. Open items settled by best practice on Safi's say-so (see decisions)
 - M1 core crates: done. Tests green on macOS, Windows and Ubuntu, and `cargo-deny` passes (CI run 38145737412)
 - M2 app shell and read-only board: built and tested headless. The side-by-side look check against the Electron screenshot is still open
-- M3 moving and creating: built and tested headless. The cross-check that Electron reads mdk-written files in the running Electron app is open
-- M4 to M8: not started
+- M3 moving and creating: built and tested headless, CI green on three OSes (run for `7aed244`). The cross-check in the running Electron app is open
+- M4 card editor and markdown editor: built and tested headless
+- M5 to M8: not started
 
 ## Decisions and deviations
 
@@ -28,6 +29,28 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M4 notes
+
+Built: the card editor as a right-hand sheet (672 px, Expand makes it two-thirds of the window): path line, title, status and priority chips, assignee, due date picker, labels, Markdown and Preview tabs (the last one used is remembered), a 20-button formatting toolbar with tooltips, gpui-kit's editor with the markdown grammar, Cmd or Ctrl+B, I and E, list continuation on Enter, "Copy AI prompt" with Electron's exact text, Delete with a confirm (undoable), a collapsible raw file view, autosave 500 ms after the last change with a flush before switching cards or closing, the "Changed on disk" banner with Keep mine and Load theirs, the "This file was deleted" banner with Recreate and Close, and raw-file editing for cards with broken frontmatter.
+
+New crate `mdk-markdown` with the toolbar commands. All 24 cases from Electron's `md-commands.check.ts` pass, plus cases for list continuation.
+
+Checked by `crates/mdk/tests/editor.rs`, 16 tests in a headless window: opening and closing a card writes nothing; typing then closing at once still saves; autosave waits 500 ms; the title and the first heading stay in step in both directions; a field edit writes only its own keys and keeps unknown keys; a change on disk reloads a clean editor silently; a change on disk during unsaved typing shows the banner and writes nothing until answered; Keep mine puts my body on top of their file; Load theirs drops mine; a deleted file can be recreated; the toolbar toggles marks and is one undo step; broken frontmatter is fixed in the raw file and the form comes back; switching cards saves the one being left and never writes to the wrong file; delete asks first and undo restores; Escape closes and saves.
+
+Not checked: how the sheet looks, the editor's syntax colours, find in card (Cmd+F, which is the kit's own search), IME input, and the date picker by hand.
+
+Decisions and deviations:
+
+- The form is compared with the card as loaded, and only the fields that differ are written, on top of the file as it is on disk at that moment. "Keep mine" therefore keeps my changed fields and their other fields. The spec says "overwrite with your version". Field-level is safer for an agent's edit to another field.
+- The title and the first heading are kept in step in both directions. Electron's editor sends the body with every save, so its title field does not change the heading.
+- Headings in the editor are bold and coloured, not bigger (M0 finding, FR-MDE-01 amended).
+- Enter continuing lists, checklists and quotes is mdk's own (`commands::continue_list`). gpui-kit's editor does not do it.
+- Toolbar edits change only the part of the text that differs, so each is one step in the editor's own undo.
+- The Preview tab is gpui-kit's plain markdown view for now. The Subtasks box, maths, Mermaid, callouts and wikilinks are M6.
+- A card whose file is too large or not UTF-8 does not open. A toast says why.
+- While the editor is open, Cmd+Z in the body is the editor's text undo. Board undo (Cmd+Z on the board) can undo an autosave as one "Edit" entry.
+- The sheet, like the dialogs, is a hand-built overlay, not gpui-kit's `Sheet`.
 
 ## M3 notes
 

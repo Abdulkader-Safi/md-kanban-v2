@@ -1,6 +1,6 @@
 //! The New card dialog, with quick-add syntax in the title and three templates.
 
-use super::Colors;
+use super::{Colors, choice, field};
 use crate::app::{Mdk, today};
 use crate::board::NewCard;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -123,52 +123,6 @@ impl NewCardForm {
     }
 }
 
-fn field(label: &'static str, c: Colors) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .text_xs()
-        .child(div().text_color(c.muted_fg).child(label))
-}
-
-/// A row of square chips where one is chosen.
-fn choice<T: Copy + PartialEq + 'static>(
-    id: &'static str,
-    options: impl IntoIterator<Item = (T, &'static str)>,
-    current: T,
-    c: Colors,
-    cx: &mut Context<Mdk>,
-    set: impl Fn(&mut NewCardForm, T) + Copy + 'static,
-) -> Div {
-    div()
-        .flex()
-        .flex_wrap()
-        .gap_1()
-        .children(options.into_iter().enumerate().map(|(n, (value, name))| {
-            div()
-                .id((id, n))
-                .px_2()
-                .py_1()
-                .border_1()
-                .cursor_pointer()
-                .map(|d| match value == current {
-                    true => d
-                        .bg(c.accent)
-                        .text_color(c.accent_fg)
-                        .border_color(c.accent),
-                    false => d.border_color(c.border).hover(|s| s.bg(c.secondary)),
-                })
-                .child(name)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(form) = &mut this.new_card {
-                        set(form, value);
-                    }
-                    cx.notify();
-                }))
-        }))
-}
-
 impl Mdk {
     pub(crate) fn submit_new_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(form) = &self.new_card else {
@@ -286,7 +240,12 @@ impl Mdk {
                                 form.status,
                                 c,
                                 cx,
-                                |form, status| form.status = status,
+                                |this, status, _, cx| {
+                                    if let Some(form) = &mut this.new_card {
+                                        form.status = status;
+                                    }
+                                    cx.notify();
+                                },
                             )))
                             .child(field("Priority", c).child(choice(
                                 "new-priority",
@@ -294,7 +253,12 @@ impl Mdk {
                                 form.priority,
                                 c,
                                 cx,
-                                |form, priority| form.priority = priority,
+                                |this, priority, _, cx| {
+                                    if let Some(form) = &mut this.new_card {
+                                        form.priority = priority;
+                                    }
+                                    cx.notify();
+                                },
                             )))
                             .child(field("Assignee", c).child(Input::new(&form.assignee).small()))
                             .child(

@@ -346,6 +346,13 @@ pub fn write(card: &ParsedCard, modified: &str) -> String {
     }
 }
 
+/// `body` with its first `# ` heading replaced by `title`. A body with no heading is
+/// returned as it is: [`write`] gives it one.
+pub fn set_title(body: &str, title: &str) -> String {
+    let heading = format!("# {}", title.trim());
+    TITLE.replace(body, regex::NoExpand(&heading)).into_owned()
+}
+
 /// The fields a user action can change. `None` leaves the field as it is on disk.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CardPatch {
@@ -377,10 +384,7 @@ pub fn apply_patch(
     if let Some(title) = &patch.title {
         // The title lives in the body's first `# ` heading.
         card.title = title.trim().to_string();
-        let heading = format!("# {}", card.title);
-        card.body = TITLE
-            .replace(&card.body, regex::NoExpand(&heading))
-            .into_owned();
+        card.body = set_title(&card.body, title);
     }
     macro_rules! set {
         ($($field:ident),*) => { $( if let Some(v) = &patch.$field { card.$field = v.clone(); } )* };

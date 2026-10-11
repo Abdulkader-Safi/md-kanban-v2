@@ -149,3 +149,31 @@ fn blocks() {
     );
     assert_eq!(run(math_block, "a¦\n\nb"), "a\n\n$$\n¦\n$$\n\nb");
 }
+
+#[test]
+fn enter_continues_lists_checklists_and_quotes() {
+    let enter = |marked: &str| run(|t, s| continue_list(t, s).expect("a list line"), marked);
+    assert_eq!(enter("- one¦"), "- one\n- ¦");
+    assert_eq!(enter("  * one¦\nnext"), "  * one\n  * ¦\nnext");
+    assert_eq!(
+        enter("- [x] done¦"),
+        "- [x] done\n- [ ] ¦",
+        "a new task starts unticked"
+    );
+    assert_eq!(enter("9. nine¦"), "9. nine\n10. ¦");
+    assert_eq!(enter("1) one¦"), "1) one\n2) ¦");
+    assert_eq!(enter("> said¦"), "> said\n> ¦");
+    assert_eq!(
+        enter("- one¦ two"),
+        "- one\n- ¦ two",
+        "the rest of the line moves down"
+    );
+    // Enter on an empty item ends the list.
+    assert_eq!(enter("- one\n- ¦"), "- one\n¦");
+    assert_eq!(enter("- [ ] ¦"), "¦");
+    // Not a list line, a selection, or the cursor inside the mark: Enter is left alone.
+    assert_eq!(continue_list("plain", 5..5), None);
+    assert_eq!(continue_list("- one", 2..5), None);
+    assert_eq!(continue_list("- one", 1..1), None);
+    assert_eq!(continue_list("# heading", 9..9), None);
+}

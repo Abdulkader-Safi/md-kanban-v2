@@ -2,16 +2,17 @@
 //! card sheet. The sidebar and the board have their own files.
 
 mod board_view;
+pub mod editor;
 mod new_card;
 mod sidebar;
 
+pub use editor::CardEditor;
 pub use new_card::NewCardForm;
 
 use crate::app::{
     Confirm, DragCard, FocusDown, FocusLeft, FocusRight, FocusUp, Mdk, NewCardKey, OpenFocused,
     PickUp, Redo, Undo,
 };
-use crate::board::CardKey;
 use crate::theme::icon;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
@@ -67,6 +68,7 @@ impl Render for Mdk {
         let c = Colors::of(cx);
         let narrow = window.viewport_size().width < NARROW;
         let font = cx.theme().font_family.clone();
+        self.reconcile_editor(window, cx);
         // A drag that ended outside every column leaves its slot behind. Clear it.
         if !cx.has_active_drag() && (self.slot.is_some() || self.dragging.is_some()) {
             self.end_drag();
@@ -109,8 +111,8 @@ impl Render for Mdk {
                         .child(self.sidebar(c, cx).occlude()),
                 )
             })
-            .when_some(self.open_card.clone(), |d, key| {
-                d.child(self.sheet(&key, c, cx))
+            .when_some(self.editor.as_ref(), |d, editor| {
+                d.child(self.editor_sheet(editor, window, c, cx))
             })
             .when_some(self.new_card.as_ref(), |d, form| {
                 d.child(self.new_card_dialog(form, c, cx))
@@ -289,9 +291,9 @@ impl Mdk {
                 this.open_new_card(Status::Backlog, window, cx)
             }))
             .on_action(cx.listener(|this, _: &PickUp, _, cx| this.pick_up_or_drop(cx)))
-            .on_action(cx.listener(|this, _: &OpenFocused, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenFocused, window, cx| {
                 if let Some(key) = this.focused.clone() {
-                    this.open(key, cx);
+                    this.open(key, window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusUp, _, cx| this.arrow(0, -1, cx)))
@@ -399,6 +401,16 @@ impl Mdk {
                 format!("Archive {count} done cards to archive/?"),
                 "Archive",
             ),
+            Confirm::Delete(key) => {
+                let title = self
+                    .board
+                    .card(key)
+                    .map_or("this card", |c| c.data.title.as_str());
+                (
+                    format!("Delete \"{title}\"? This removes the markdown file."),
+                    "Delete",
+                )
+            }
         };
         div()
             .id("confirm-backdrop")
@@ -450,94 +462,6 @@ impl Mdk {
                     ),
             )
     }
-
-    fn close_sheet(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.open_card = None;
-        cx.notify();
-    }
-
-    /// The card sheet. A read-only placeholder until the editor lands in M4.
-    fn sheet(&self, key: &CardKey, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let mono = cx.theme().mono_font_family.clone();
-        let (title, raw, project) = match self.board.card(key) {
-            Some(card) => (
-                card.data.title.clone(),
-                card.raw.to_string(),
-                key.project.clone(),
-            ),
-            None => Default::default(),
-        };
-        let project = self
-            .board
-            .project(&project)
-            .map_or(String::new(), |p| p.name.clone());
-        div()
-            .id("sheet-backdrop")
-            .absolute()
-            .inset_0()
-            .bg(black().opacity(0.4))
-            .on_click(cx.listener(Self::close_sheet))
-            .child(
-                div()
-                    .id("sheet")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .right_0()
-                    .bottom_0()
-                    .w(px(672.))
-                    .max_w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .p_4()
-                    .bg(c.bg)
-                    .border_l_1()
-                    .border_color(c.border)
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .font_family(mono.clone())
-                                    .text_xs()
-                                    .text_color(c.muted_fg)
-                                    .child(format!("{project}/{}", key.rel_path)),
-                            )
-                            .child(
-                                Button::new("sheet-close")
-                                    .ghost()
-                                    .small()
-                                    .icon(icon("x"))
-                                    .on_click(cx.listener(Self::close_sheet)),
-                            ),
-                    )
-                    .child(div().text_lg().font_weight(FontWeight::BOLD).child(title))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(c.muted_fg)
-                            .child("Read-only for now. The card editor arrives in M4."),
-                    )
-                    .child(
-                        div()
-                            .id("sheet-raw")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .border_1()
-                            .border_color(c.border)
-                            .bg(c.muted.opacity(0.4))
-                            .p_3()
-                            .font_family(mono)
-                            .text_xs()
-                            .child(raw),
-                    ),
-            )
-    }
 }
 
 fn empty_state(c: Colors) -> Div {
@@ -553,4 +477,46 @@ fn empty_state(c: Colors) -> Div {
         .border_color(c.border)
         .p_10()
         .text_center()
+}
+
+/// A labelled form field.
+pub(crate) fn field(label: &'static str, c: Colors) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .text_xs()
+        .child(div().text_color(c.muted_fg).child(label))
+}
+
+/// A row of square chips where one is chosen. `pick` runs with the chip that was clicked.
+pub(crate) fn choice<T: Copy + PartialEq + 'static>(
+    id: &'static str,
+    options: impl IntoIterator<Item = (T, &'static str)>,
+    current: T,
+    c: Colors,
+    cx: &mut Context<Mdk>,
+    pick: impl Fn(&mut Mdk, T, &mut Window, &mut Context<Mdk>) + Copy + 'static,
+) -> Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .gap_1()
+        .children(options.into_iter().enumerate().map(|(n, (value, name))| {
+            div()
+                .id((id, n))
+                .px_2()
+                .py_1()
+                .border_1()
+                .cursor_pointer()
+                .map(|d| match value == current {
+                    true => d
+                        .bg(c.accent)
+                        .text_color(c.accent_fg)
+                        .border_color(c.accent),
+                    false => d.border_color(c.border).hover(|s| s.bg(c.secondary)),
+                })
+                .child(name)
+                .on_click(cx.listener(move |this, _, window, cx| pick(this, value, window, cx)))
+        }))
 }

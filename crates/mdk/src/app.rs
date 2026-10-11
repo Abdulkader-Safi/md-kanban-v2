@@ -4,7 +4,7 @@
 use crate::board::{Board, CardKey, NewCard, ProjectId};
 use crate::prefs::{Prefs, SavedProject, ThemeChoice, WindowState};
 use crate::theme;
-use crate::views::NewCardForm;
+use crate::views::{CardEditor, NewCardForm};
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui_kit::base::AutoScroll;
@@ -36,6 +36,7 @@ actions!(
 /// "Mdk" is the whole window. "Board" is the board area only, so its plain keys (N, Space,
 /// arrows) never fire while the user is typing in a dialog or the editor.
 pub fn bind_keys(cx: &mut App) {
+    crate::views::editor::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("escape", CloseTop, Some("Mdk")),
@@ -126,6 +127,8 @@ pub struct Toast {
 pub enum Confirm {
     /// Archive this many done cards.
     Archive(usize),
+    /// Delete this card's file.
+    Delete(CardKey),
 }
 
 /// A card picked up with Space, and where it was, so Escape can put it back.
@@ -154,8 +157,9 @@ pub struct Mdk {
     /// has one row more than its cards: the last row is "+ Add card".
     pub lists: Vec<ListState>,
     pub(crate) columns: Vec<Vec<(CardKey, u64)>>,
-    /// The card open in the side sheet.
+    /// The card open in the side sheet, and the sheet's form.
     pub open_card: Option<CardKey>,
+    pub editor: Option<CardEditor>,
     /// The sidebar overlay, for windows too narrow to keep the sidebar on screen.
     pub(crate) show_sidebar: bool,
     /// Local time of the last refresh, for the "checked" line.
@@ -266,6 +270,7 @@ impl Mdk {
                 .collect(),
             columns: vec![Vec::new(); Status::ALL.len()],
             open_card: None,
+            editor: None,
             show_sidebar: false,
             last_check: None,
             notice,
@@ -502,6 +507,12 @@ impl Mdk {
         cx.notify();
     }
 
+    /// A preference changed: save it and redraw.
+    pub(crate) fn prefs_changed(&mut self, cx: &mut Context<Self>) {
+        self.save_soon(cx);
+        cx.notify();
+    }
+
     pub fn set_vim_keys(&mut self, on: bool, cx: &mut Context<Self>) {
         self.prefs.vim_keys = on;
         self.save_soon(cx);
@@ -643,6 +654,15 @@ impl Mdk {
                     let archived = self.board.archive_done();
                     if let Some(count) = self.settle(archived, cx) {
                         self.show_toast(format!("Archived {count} cards to archive/"), true, cx);
+                    }
+                }
+                Confirm::Delete(key) => {
+                    // Close without saving: the file is about to go.
+                    self.editor = None;
+                    self.open_card = None;
+                    let deleted = self.board.delete_card(&key);
+                    if self.settle(deleted, cx).is_some() {
+                        self.show_toast("Deleted", true, cx);
                     }
                 }
             }
@@ -878,14 +898,8 @@ impl Mdk {
 
     // ---- opening and closing ----------------------------------------------------------------
 
-    pub fn open(&mut self, key: CardKey, cx: &mut Context<Self>) {
-        self.menu_for = None;
-        self.open_card = Some(key);
-        cx.notify();
-    }
-
     /// Escape closes the top thing: a confirm, the dialog, a picked-up card, the menu, the
-    /// sheet, then the sidebar overlay.
+    /// card sheet (saving first), then the sidebar overlay.
     pub(crate) fn close_top(&mut self, _: &CloseTop, window: &mut Window, cx: &mut Context<Self>) {
         if self.confirm.is_some() {
             self.answer_confirm(false, window, cx);
@@ -893,7 +907,10 @@ impl Mdk {
             self.close_new_card(window, cx);
         } else if self.grabbed.is_some() {
             self.cancel_grab(cx);
-        } else if self.menu_for.take().is_none() && self.open_card.take().is_none() {
+        } else if self.menu_for.take().is_some() {
+        } else if self.editor.is_some() {
+            self.close_editor(window, cx);
+        } else {
             self.show_sidebar = false;
         }
         self.focus.focus(window, cx);

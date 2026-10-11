@@ -493,3 +493,27 @@ fn a_session_leaves_only_card_files_in_the_folder() {
     fx.board.redo().unwrap();
     assert_eq!(fx.files(), ["a.md", "archive/b.md"]);
 }
+
+#[test]
+fn a_broken_file_is_fixed_by_writing_its_raw_text() {
+    let broken = "---\nstatus: [todo\n---\n# Broken\n";
+    let mut fx = Fx::new(&[("broken.md", broken.into())]);
+    let key = fx.key("broken.md");
+    let fixed = "---\nstatus: \"todo\"\n---\n# Broken\n";
+    fx.board.write_raw(&key, fixed).unwrap();
+    assert_eq!(fx.read("broken.md"), fixed);
+    let card = fx.board.card(&key).unwrap();
+    assert_eq!((card.error(), card.data.status), (None, Status::Todo));
+    // Now it moves like any card, and both steps undo.
+    fx.board.move_card(&key, Status::Done, None).unwrap();
+    fx.board.undo().unwrap();
+    fx.board.undo().unwrap();
+    assert_eq!(fx.read("broken.md"), broken);
+
+    // Writing the same text again is not an edit. A deleted file can be written back.
+    fx.board.write_raw(&key, broken).unwrap();
+    assert!(!fx.board.can_undo());
+    fs::remove_file(fx.dir.path().join("broken.md")).unwrap();
+    fx.board.write_raw(&key, fixed).unwrap();
+    assert_eq!(fx.read("broken.md"), fixed);
+}

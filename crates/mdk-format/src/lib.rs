@@ -9,7 +9,7 @@
 mod card;
 mod text;
 
-pub use card::{CardPatch, ParsedCard, RawKey, apply_patch, now_iso, parse, write};
+pub use card::{CardPatch, ParsedCard, RawKey, apply_patch, now_iso, parse, set_title, write};
 pub use text::{
     Date, QuickAdd, Subtask, Template, Tone, excerpt, format_due, new_file_name, parse_quick_add,
     slugify, strip_comments, subtasks, template, toggle_subtask,

@@ -373,8 +373,8 @@ impl Mdk {
                 .when(slot, |d| d.child(drop_slot(c)))
                 .child(
                     card_face(card, state, &this, today, mono.clone(), c)
-                        .on_click(move |_, _, cx| {
-                            open.update(cx, |this, cx| this.open(key.clone(), cx))
+                        .on_click(move |_, window, cx| {
+                            open.update(cx, |this, cx| this.open(key.clone(), window, cx))
                         })
                         .on_drag(drag, move |drag, _, _, cx| {
                             started.update(cx, |this, cx| {

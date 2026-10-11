@@ -339,3 +339,56 @@ pub fn mermaid(text: &str, selection: Range<usize>) -> Edit {
 pub fn rule(text: &str, selection: Range<usize>) -> Edit {
     block(text, selection, "---", 3..3)
 }
+
+/// Enter at the end of a list item, checklist item or quote line: start the next one.
+/// On an item with nothing in it, Enter ends the list by removing the mark. Returns
+/// `None` when the cursor is not in such a line, so Enter does what it normally does.
+pub fn continue_list(text: &str, selection: Range<usize>) -> Option<Edit> {
+    static ITEM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(\s*)(?:([-*+]) (\[[ xX]\] )?|(\d+)([.)]) |(>) ?)").unwrap()
+    });
+    if !selection.is_empty() {
+        return None;
+    }
+    let cursor = selection.start;
+    let line = line_at(text, cursor);
+    let found = ITEM.captures(&text[line.clone()])?;
+    let mark_len = found[0].len();
+    if cursor < line.start + mark_len {
+        return None;
+    }
+    if text[line.start + mark_len..line.end].trim().is_empty() {
+        // An empty item: take the mark away and leave a plain empty line.
+        let change = Change {
+            from: line.start,
+            to: line.end,
+            insert: String::new(),
+        };
+        return Some(Edit {
+            text: apply(text, &[change]),
+            selection: line.start..line.start,
+        });
+    }
+    let indent = &found[1];
+    let mark = if let Some(bullet) = found.get(2) {
+        // A new checklist item starts unticked.
+        let task = if found.get(3).is_some() { "[ ] " } else { "" };
+        format!("{} {task}", bullet.as_str())
+    } else if let Some(number) = found.get(4) {
+        let next = number.as_str().parse::<u64>().map_or(1, |n| n + 1);
+        format!("{next}{} ", &found[5])
+    } else {
+        "> ".to_string()
+    };
+    let insert = format!("\n{indent}{mark}");
+    let at = cursor + insert.len();
+    let change = Change {
+        from: cursor,
+        to: cursor,
+        insert,
+    };
+    Some(Edit {
+        text: apply(text, &[change]),
+        selection: at..at,
+    })
+}
