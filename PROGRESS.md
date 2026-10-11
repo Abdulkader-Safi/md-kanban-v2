@@ -5,8 +5,9 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 ## Status
 
 - M0 de-risk: spikes done. Open items settled by best practice on Safi's say-so (see decisions)
-- M1 core crates: `mdk-format` and `mdk-store` done on macOS, 33 tests. Waiting on CI for Windows and Linux
-- M2 to M8: not started
+- M1 core crates: done. Tests green on macOS, Windows and Ubuntu, and `cargo-deny` passes (CI run 38145737412)
+- M2 app shell and read-only board: built and tested headless. The side-by-side look check against the Electron screenshot is still open
+- M3 to M8: not started
 
 ## Decisions and deviations
 
@@ -26,6 +27,32 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M2 notes
+
+Run it: `cargo run -p mdk`. It keeps its settings in the OS config folder, or in `MDK_CONFIG_DIR`.
+
+Built: window with saved size and position, dark, light and system themes from `crates/mdk/assets/theme/mdk.json`, Geist font and Tabler icons bundled, header, sidebar (connect, projects with open counts, rescan, remove, Locate folder, work folders, auto-refresh and Vim switches, "checked" time), five virtualised columns, card faces, welcome and "No cards match" states, a read-only card sheet, background scans, live updates from the watcher, and `config.json`.
+
+Checked by tests (`cargo test -p mdk`, 19 tests): the board logic, the config file, and the real root view in a headless window: loading a saved project into columns, connecting from the welcome state, saving and restoring selection and toggles, removing a project, a card moving when another program edits its file, the card sheet opening and closing on Escape, and a second launch signalling the first.
+
+Not checked yet:
+
+- How it looks. The screen was locked while this was built, so no window capture was possible. The comparison with `references/electron-board-screenshot.png` and Safi's sign-off on it are open.
+- Safi's real `clinicos` folder. The `MD-Kanban` task folder was only loaded in a manual run, not compared card by card with Electron.
+- FR-BOARD-06 (1,000 cards without slow frames). The columns are virtualised as in the drag spike, but it is not measured.
+
+Deviations and stand-ins:
+
+- The header's Search button and the welcome state's "Create sample project" are shown disabled. The palette is M7 and the sample project is M8.
+- "New card", "+", "+ Add card" and "Create first card" show a one-line notice until the dialog lands in M3.
+- A notice line above the board stands in for toasts until M3.
+- The card sheet is hand-built and read-only. gpui-kit's `Sheet` and the editor replace it in M4.
+- Single instance works on macOS and Linux through a Unix socket in the config folder. Windows has no check yet (M8).
+- Fonts: Electron uses Roboto for body text and Geist for headings. mdk uses Geist throughout, as the spec says. The files are Fontsource's Latin subset, converted from WOFF. Other scripts fall back to a system font.
+- The card key is hashed into each column list's row identity, so a changed card is re-measured and the list keeps its scroll position.
+- Card file writes will run on the UI thread when they arrive in M3. Scans already run in the background.
+- No log file yet. Watcher errors are dropped, and the next rescan recovers.
 
 ## M1 notes
 

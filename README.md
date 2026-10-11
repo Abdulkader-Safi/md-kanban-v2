@@ -8,8 +8,8 @@ mdk is a Rust rebuild of [MD Kanban](https://github.com/Abdulkader-Safi/md-kanba
 
 In progress. The build follows `resources/06-build-spec.md`, milestone by milestone, and `PROGRESS.md` has the current state.
 
-- Done: the M0 spikes (file watching, drag and drop, Vim keys, markdown preview), the card format crate and the file store crate.
-- Not built yet: the app window. There is no `mdk` binary to run so far.
+- Works today: connect folders, see their cards in five columns, filter by project and work folder, and watch the board update when another program edits a card file.
+- Read-only so far. Moving, creating and editing cards come next (milestones M3 and M4), then Vim keys, the preview, filters and the command palette.
 
 ## What you need
 
@@ -45,15 +45,23 @@ cargo test -p file-spike
 
 ## Run the app
 
-Not available yet. When the app crate lands (milestone M2) this will be:
-
 ```sh
 cargo run -p mdk
 ```
 
+The first build compiles GPUI and takes a few minutes. Click "Connect folder" and pick a folder of markdown cards. To try it on sample cards, clone the [Electron repo](https://github.com/Abdulkader-Safi/md-kanban) and connect its `examples/demo-project` folder.
+
+Settings live in one `config.json` in the OS config folder (`~/Library/Application Support/mdk` on macOS, `~/.config/mdk` on Linux, `%APPDATA%\mdk` on Windows). mdk writes nothing but card files inside your project folders.
+
+Environment variables:
+
+- `MDK_CONFIG_DIR`: use another folder for `config.json`.
+- `MDK_NO_WATCH=1`: turn the file watcher off.
+
 ## Layout
 
 - `crates/mdk-format`: the card format. Parse and write card files, quick-add, due labels.
+- `crates/mdk`: the app. Board state, preferences, theme and views.
 - `crates/mdk-store`: file access for a project folder. Scan, guarded reads, atomic writes, live watching.
 - `spikes/`: the M0 spikes.
 - `resources/`: the product and build spec.
