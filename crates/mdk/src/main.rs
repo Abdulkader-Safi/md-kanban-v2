@@ -15,9 +15,10 @@ fn main() {
             mdk::theme::init(cx);
             mdk::app::bind_keys(cx);
             let (prefs, notice) = Prefs::load(&dir);
+            let watch = std::env::var_os("MDK_NO_WATCH").is_none_or(|v| v != "1");
             let options = mdk::app::window_options(&prefs, cx);
             gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| Mdk::new(prefs, dir, notice, instance, window, cx))
+                cx.new(|cx| Mdk::new(prefs, dir, notice, instance, watch, window, cx))
             })
             .expect("the window opens");
             cx.activate(true);

@@ -16,6 +16,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: GPUI system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libwayland-dev libfontconfig1-dev libfreetype6-dev
       - run: cargo fmt --all --check
       # The default members are the crates in crates/. The UI spikes need a window and
       # GPUI's system libraries, so they are left out. The file spike runs everywhere.

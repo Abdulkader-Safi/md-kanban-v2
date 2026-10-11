@@ -30,7 +30,9 @@ struct Fixture {
     view: Entity<Mdk>,
 }
 
-fn open(cx: &mut TestAppContext, prefs: impl FnOnce(&Path) -> Prefs) -> Fixture {
+/// `watch` starts the real file watcher. Only the live-update test wants it: the watcher
+/// thread wakes the app from outside, which GPUI's test scheduler allows only when parking.
+fn open(cx: &mut TestAppContext, watch: bool, prefs: impl FnOnce(&Path) -> Prefs) -> Fixture {
     let project = tempfile::tempdir().unwrap();
     put(
         project.path(),
@@ -65,7 +67,7 @@ fn open(cx: &mut TestAppContext, prefs: impl FnOnce(&Path) -> Prefs) -> Fixture 
         let (_tx, instance) = futures::channel::mpsc::unbounded();
         std::mem::forget(_tx);
         gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| Mdk::new(prefs, dir, None, instance, window, cx))
+            cx.new(|cx| Mdk::new(prefs, dir, None, instance, watch, window, cx))
         })
         .unwrap()
     });
@@ -112,7 +114,7 @@ fn column(cx: &mut TestAppContext, f: &Fixture, status: Status) -> Vec<String> {
 
 #[gpui_kit::test]
 fn a_saved_project_loads_into_columns_and_renders(cx: &mut TestAppContext) {
-    let f = open(cx, connected);
+    let f = open(cx, false, connected);
     assert_eq!(column(cx, &f, Status::Todo), ["Fix login", "Fix logout"]);
     assert_eq!(column(cx, &f, Status::Review), ["Drag cards"]);
     assert_eq!(column(cx, &f, Status::Backlog), ["Broken"]);
@@ -130,7 +132,7 @@ fn a_saved_project_loads_into_columns_and_renders(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn with_no_projects_the_welcome_state_renders(cx: &mut TestAppContext) {
-    let f = open(cx, |_| Prefs::default());
+    let f = open(cx, false, |_| Prefs::default());
     cx.update(|cx| assert!(f.view.read(cx).board.projects.is_empty()));
     // Connecting the folder fills the board and selects the project.
     let root = f.project.path().to_path_buf();
@@ -142,7 +144,7 @@ fn with_no_projects_the_welcome_state_renders(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn selection_and_toggles_are_saved_and_restored(cx: &mut TestAppContext) {
-    let f = open(cx, connected);
+    let f = open(cx, false, connected);
     cx.update_window(f.window.into(), |_, window, cx| {
         f.view.update(cx, |view, cx| {
             view.select_project(Some("testproj".into()), cx);
@@ -166,7 +168,7 @@ fn selection_and_toggles_are_saved_and_restored(cx: &mut TestAppContext) {
     assert_eq!(saved.projects.len(), 1);
 
     // A new window started from the saved file comes back the same.
-    let again = open(cx, |_| {
+    let again = open(cx, false, |_| {
         let mut prefs = saved.clone();
         prefs.projects[0].root = f.project.path().to_path_buf();
         prefs
@@ -180,7 +182,7 @@ fn selection_and_toggles_are_saved_and_restored(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn removing_a_project_leaves_its_files(cx: &mut TestAppContext) {
-    let f = open(cx, connected);
+    let f = open(cx, false, connected);
     cx.update(|cx| {
         f.view
             .update(cx, |view, cx| view.remove_project("testproj", cx))
@@ -193,7 +195,7 @@ fn removing_a_project_leaves_its_files(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn an_edit_by_another_program_moves_the_card(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
-    let f = open(cx, connected);
+    let f = open(cx, true, connected);
     // The agent moves a card by editing one line of its file.
     std::thread::sleep(Duration::from_millis(400));
     put(
@@ -211,11 +213,14 @@ fn an_edit_by_another_program_moves_the_card(cx: &mut TestAppContext) {
     assert_eq!(column(cx, &f, Status::Done), ["Fix login"]);
     assert_eq!(column(cx, &f, Status::Todo), ["Fix logout"]);
     settle(cx, &f);
+    // Stop the watcher thread before the test's scheduler goes away.
+    cx.update(|cx| f.view.update(cx, |view, _| view.stop_watching()));
+    std::thread::sleep(Duration::from_millis(300));
 }
 
 #[gpui_kit::test]
 fn opening_a_card_shows_the_sheet_and_escape_closes_it(cx: &mut TestAppContext) {
-    let f = open(cx, connected);
+    let f = open(cx, false, connected);
     let key = cx.update(|cx| f.view.read(cx).board.column(Status::Review)[0].key.clone());
     cx.update(|cx| f.view.update(cx, |view, cx| view.open(key.clone(), cx)));
     settle(cx, &f);

@@ -92,6 +92,8 @@ pub struct Mdk {
     pub prefs: Prefs,
     config_dir: PathBuf,
     watchers: HashMap<ProjectId, Watcher>,
+    /// False when live updates are switched off for the whole run (`MDK_NO_WATCH=1`, tests).
+    watch_enabled: bool,
     events: UnboundedSender<(ProjectId, Vec<StoreEvent>)>,
     /// One virtualised list per column, and the cards each one currently shows. Every list
     /// has one row more than its cards: the last row is "+ Add card".
@@ -115,6 +117,7 @@ impl Mdk {
         config_dir: PathBuf,
         notice: Option<String>,
         mut instance: Instance,
+        watch_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -182,6 +185,7 @@ impl Mdk {
             prefs,
             config_dir,
             watchers: HashMap::new(),
+            watch_enabled,
             events,
             lists: Status::ALL
                 .iter()
@@ -274,6 +278,11 @@ impl Mdk {
         for id in stale {
             self.rescan(&id, cx);
         }
+    }
+
+    /// Stop every file watcher. Live updates stay off until the next rescan.
+    pub fn stop_watching(&mut self) {
+        self.watchers.clear();
     }
 
     fn checked(&mut self) {
