@@ -1,0 +1,18 @@
+{
+  "id": "keyboard-drag-polish-2026-09-07",
+  "title": "Keyboard move plus drag polish",
+  "body": "# Keyboard move plus drag polish\n\nDrag is mouse only today and long boards trap cards. Add a keyboard path and honest drop feedback.\n\n- [x] Keyboard move: focus card, Space picks up, arrows move across columns, Space drops, Esc cancels, with live announcement\n- [x] Drop slot: card shaped gap at landing spot plus column highlight in `KanbanColumn.vue`\n- [x] Autoscroll: board pans and column scrolls while holding a card; add \"Move to\" menu as non-drag fallback\n- [x] Verify with `vue-tsc --noEmit`",
+  "status": "done",
+  "priority": "high",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-07T06:17:48.000Z",
+  "modified": "2026-09-08T04:31:52.000Z",
+  "labels": [
+    "board",
+    "ux",
+    "a11y",
+    "drag"
+  ],
+  "order": 26
+}

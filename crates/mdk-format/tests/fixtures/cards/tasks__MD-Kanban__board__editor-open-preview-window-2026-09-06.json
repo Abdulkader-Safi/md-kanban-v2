@@ -1,0 +1,16 @@
+{
+  "id": "editor-open-preview-window-2026-09-06",
+  "title": "Open preview in its own tab",
+  "body": "# Open preview in its own tab\n\nAfter single-pane tabs land, allow opening the rendered preview in its own browser tab for long reads.\n\n- [x] Add \"Open in new tab\" button on the Preview tab that renders `previewHtml` in a new window\n- [x] Verify with `vue-tsc --noEmit`",
+  "status": "done",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-06T16:39:07Z",
+  "modified": "2026-09-06T16:55:00Z",
+  "labels": [
+    "board",
+    "editor"
+  ],
+  "order": 8
+}

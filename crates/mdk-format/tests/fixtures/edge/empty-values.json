@@ -1,0 +1,13 @@
+{
+  "id": "empty-values",
+  "title": "Real title",
+  "body": "## Not a title\n\n# Real title",
+  "status": "backlog",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-01-02T03:04:05.678Z",
+  "modified": "2026-01-02T03:04:05.678Z",
+  "labels": [],
+  "order": 0
+}

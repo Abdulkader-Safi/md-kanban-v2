@@ -1,0 +1,16 @@
+{
+  "id": "device-sync-2026-09-06",
+  "title": "Sync between devices",
+  "body": "# Sync between devices\n\nKeep task state in sync across devices through Appwrite database plus MinIO files. Cover offline edits, conflict resolution when the same card changes in two places, and ordering. Blocked on the sync research card.",
+  "status": "backlog",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-06T11:20:23Z",
+  "modified": "2026-09-06T11:20:23Z",
+  "labels": [
+    "sync",
+    "devices"
+  ],
+  "order": 10
+}

@@ -1,0 +1,17 @@
+{
+  "id": "drag-undo-2026-09-07",
+  "title": "Undo after drag move",
+  "body": "# Undo after drag move\n\nA misdrop into the wrong column is easy and annoying to fix by hand. Show a brief Undo after every drop.\n\n- [x] Add \"Moved to X, Undo\" toast in `KanbanColumn.vue` / `App.vue` after `moveTask`, 5s window\n- [x] Undo restores prior status and order via `updateTask`\n- [x] Verify with `vue-tsc --noEmit`",
+  "status": "done",
+  "priority": "high",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-07T06:17:48.000Z",
+  "modified": "2026-09-07T10:26:18.000Z",
+  "labels": [
+    "board",
+    "ux",
+    "drag"
+  ],
+  "order": 18
+}

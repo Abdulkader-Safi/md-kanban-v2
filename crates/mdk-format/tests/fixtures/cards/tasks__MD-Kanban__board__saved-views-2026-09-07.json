@@ -1,0 +1,16 @@
+{
+  "id": "saved-views-2026-09-07",
+  "title": "Saved filter views",
+  "body": "# Saved filter views\n\nRebuilding the same filter each session wastes time. Save filter plus sort as named views.\n\n- [x] Save current `FilterBar.vue` state as named views e.g. \"Overdue\", \"Assigned to me\", \"This week\"\n- [x] Persist in localStorage per project, one-click apply\n- [x] Verify with `vue-tsc --noEmit`\n\nDone 2026-09-09: named views in `FilterBar.vue`, stored in localStorage per project (`md-kanban/views/v1`), one-click apply chips plus delete. `vue-tsc --noEmit` clean.",
+  "status": "done",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-07T06:17:48.000Z",
+  "modified": "2026-09-09T00:00:00.000Z",
+  "labels": [
+    "board",
+    "filters"
+  ],
+  "order": 24
+}

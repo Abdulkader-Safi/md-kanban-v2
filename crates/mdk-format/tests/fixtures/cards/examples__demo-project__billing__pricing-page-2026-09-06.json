@@ -1,0 +1,15 @@
+{
+  "id": "pricing-page-2026-09-06",
+  "title": "Pricing page",
+  "body": "# Pricing page\n\nCompare monthly vs yearly. Needs design tokens first.",
+  "status": "backlog",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-06T10:30:00.000Z",
+  "modified": "2026-09-06T10:30:00.000Z",
+  "labels": [
+    "ui"
+  ],
+  "order": 0
+}

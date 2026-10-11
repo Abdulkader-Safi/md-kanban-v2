@@ -1,0 +1,13 @@
+{
+  "id": "unclosed",
+  "title": "Never closed",
+  "body": "---\nid: \"x\"\nstatus: \"todo\"\n\n# Never closed",
+  "status": "backlog",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-01-02T03:04:05.678Z",
+  "modified": "2026-01-02T03:04:05.678Z",
+  "labels": [],
+  "order": 0
+}

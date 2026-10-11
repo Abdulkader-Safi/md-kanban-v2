@@ -1,0 +1,16 @@
+{
+  "id": "desktop-run-docs-2026-09-06",
+  "title": "Desktop run docs",
+  "body": "# Desktop run docs\n\nUpdate the README with how to run and install the desktop app next to the browser instructions.\n\n- [x] Desktop run (`bun run electron:dev`) documented next to browser `bun run dev`\n- [x] Desktop install (`bun run dist` -> `release/MD Kanban-0.0.0-arm64.dmg`, drag to Applications, unsigned open) documented\n- [x] Verified DMG name against `release/` and scripts in `package.json`",
+  "status": "done",
+  "priority": "low",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-06T09:36:24Z",
+  "modified": "2026-09-06T14:30:55Z",
+  "labels": [
+    "electron",
+    "docs"
+  ],
+  "order": 5
+}

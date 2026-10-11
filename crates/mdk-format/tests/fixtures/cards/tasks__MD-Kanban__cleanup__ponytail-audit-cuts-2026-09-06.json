@@ -1,0 +1,16 @@
+{
+  "id": "ponytail-audit-cuts-2026-09-06",
+  "title": "Apply ponytail audit cuts",
+  "body": "# Apply ponytail audit cuts\n\nFull-repo over-engineering audit returned 14 findings, net minus 70 lines, 15 files, 2 deps. Apply them in order:\n\n- [x] Delete `vue-router` and `reka-ui` deps (never imported)\n- [x] Delete generated icon intermediates in `build/` (keep `app-icon.svg` + `icon.icns`)\n- [x] Delete scaffold leftovers (`public/icons.svg`, `src/assets/*`)\n- [x] Delete `TASK_FILE_DOC`, `clearHandles`, `PRIORITY_ORDER`, `rootPath?`, `UiCard.vue`\n- [x] Shrink `makeFileName` pattern switch to one format\n- [x] Route browser `rescanProject` through `applyScanned`\n- [x] Inline `KanbanBoard.vue` into App, drop `electron()` wrapper, simplify `buildNewTask` return\n- [x] Rebuild and confirm the board still works\n\nDone: all cuts applied, build passes, parser round-trip verified, preview serves 200.",
+  "status": "done",
+  "priority": "medium",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-06T11:31:23Z",
+  "modified": "2026-09-06T11:34:24Z",
+  "labels": [
+    "cleanup",
+    "ponytail"
+  ],
+  "order": 12
+}

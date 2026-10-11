@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["spikes/*"]
+members = ["crates/*", "spikes/*"]
+# The M0 spikes stay as reference until M2 to M6 replace them. They are not built by default.
+default-members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"

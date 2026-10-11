@@ -1,0 +1,16 @@
+{
+  "id": "login-form-2026-09-06",
+  "title": "Rebuild login form",
+  "body": "# Rebuild login form\n\n- [x] Draft the fields\n- [ ] Inline validation errors\n- [ ] Wire up the new auth endpoint",
+  "status": "todo",
+  "priority": "high",
+  "assignee": "safi",
+  "dueDate": null,
+  "created": "2026-09-06T10:30:00.000Z",
+  "modified": "2026-09-06T14:20:00.000Z",
+  "labels": [
+    "feature",
+    "auth"
+  ],
+  "order": 1
+}

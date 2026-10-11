@@ -1,0 +1,17 @@
+{
+  "id": "command-palette-2026-09-07",
+  "title": "Command palette on Cmd K",
+  "body": "# Command palette on Cmd K\n\nJump to a card, create a card, or move the open card without touching the mouse. Kandown and Cairn both treat this as core.\n\n- [x] Add Cmd+K / Ctrl+K palette over the board (search title, body, id, assignee, label)\n- [x] Actions: open card, create card, move open card to a status\n- [x] Verify with `vue-tsc --noEmit`",
+  "status": "done",
+  "priority": "high",
+  "assignee": "",
+  "dueDate": null,
+  "created": "2026-09-07T06:17:48.000Z",
+  "modified": "2026-09-07T10:45:43.000Z",
+  "labels": [
+    "board",
+    "ux",
+    "search"
+  ],
+  "order": 17
+}

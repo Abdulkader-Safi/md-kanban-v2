@@ -1,0 +1,15 @@
+{
+  "id": "numbers",
+  "title": "Spaced title",
+  "body": "#   Spaced title  \n\ntext",
+  "status": "backlog",
+  "priority": "medium",
+  "assignee": "7",
+  "dueDate": null,
+  "created": "2026-01-01T00:00:00Z",
+  "modified": "2026-01-02T03:04:05.678Z",
+  "labels": [
+    "solo"
+  ],
+  "order": 0
+}

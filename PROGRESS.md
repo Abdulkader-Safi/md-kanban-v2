@@ -4,15 +4,26 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 
 ## Status
 
-- M0 de-risk: spikes done, waiting on Safi for the open items below
-- M1 to M8: not started
+- M0 de-risk: spikes done. Open items settled by best practice on Safi's say-so (see decisions)
+- M1 core crates: `mdk-format` done, `mdk-store` next
+- M2 to M8: not started
 
 ## Decisions and deviations
 
 - The spec files live in `resources/`, where Safi put them. The build spec calls the folder `docs/spec/`. Not moved.
 - The Electron source is read from the local clone at `../MD-Kanban` (commit `edebd29`).
+- The repo is `github.com/Abdulkader-Safi/md-kanban-v2`. The spec names it `mdk`.
+- Safi, 2026-10-11: settle open items by best practice and keep building, since only he uses the tool for now. So:
+  - Editor headings are bold and coloured, not bigger. FR-MDE-01 is amended.
+  - Wikilinks and `==highlight==` use the source rewrite from the preview spike. A long highlight wraps as a unit. Worth a gpui-kit patch later.
+  - The 10 s drag, the Windows and Linux drag runs, and the Electron cold start, memory and latency numbers move to the M8 benchmark and release checklist.
+- `mdk-format` reads frontmatter with a port of Electron's own line parser, not with `serde-saphyr`. Electron does not use a YAML parser, and only a port gives the same field values on every fixture. `serde-saphyr` still checks the frontmatter is valid YAML and sets `parse_error` (FR-FILE-05).
+- CRLF files: Electron's parser reads no fields from a CRLF file (its regex stops at `\r`). mdk normalises line endings before parsing and writes CRLF back (FR-FILE-08).
+- Frontmatter comment lines are kept on write, after the nine known keys, along with the unknown keys.
+- Due labels count whole days between dates. Electron rounds milliseconds from the current time, so its label changes during the day.
+- The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
 
-## M0 open items (need Safi)
+## M0 open items (settled, see decisions)
 
 1. Headings in the editor cannot be bigger than body text. OK to amend FR-MDE-01 to bold and coloured only?
 2. Wikilinks and `==highlight==` are done by rewriting the source before parsing, not by a plugin on text nodes. A highlight renders as one inline box, so a long one wraps as a unit. OK, or should mdk send gpui-kit a one-line patch adding `mark` to its inline tags?
