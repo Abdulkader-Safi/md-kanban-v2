@@ -1,0 +1,6 @@
+[package]
+name = "mdk-vim"
+description = "A small Vim: modes, motions and operators over any text buffer. No UI in here."
+edition.workspace = true
+license.workspace = true
+version.workspace = true

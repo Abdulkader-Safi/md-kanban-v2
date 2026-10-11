@@ -585,3 +585,179 @@ fn enter_continues_a_list(cx: &mut TestAppContext) {
 
 #[allow(dead_code)]
 fn unused(_: &Path) {}
+
+// ---- M5: Vim keys in the card editor ---------------------------------------------------------
+
+impl Fx {
+    /// Open a card with Vim on, the keyboard in the body and the cursor at the start.
+    fn open_with_vim(&self, cx: &mut TestAppContext, rel: &str) {
+        cx.update(|cx| self.view.update(cx, |view, cx| view.set_vim_keys(true, cx)));
+        self.open_card(cx, rel);
+        self.with(cx, |view, window, cx| {
+            let body = view.editor.as_ref().unwrap().body.clone();
+            body.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.set_selected_range(0..0, cx);
+            });
+        });
+    }
+
+    /// Type printable keys, one keystroke each.
+    fn keys(&self, cx: &mut TestAppContext, text: &str) {
+        cx.update_window(self.window.into(), |_, window, cx| window.input(text, cx))
+            .unwrap();
+        cx.run_until_parked();
+    }
+
+    fn press(&self, cx: &mut TestAppContext, key: &str) {
+        cx.update_window(self.window.into(), |_, window, cx| window.press(key, cx))
+            .unwrap();
+        cx.run_until_parked();
+    }
+
+    fn vim_status(&self, cx: &mut TestAppContext) -> String {
+        cx.update(|cx| self.view.read(cx).editor.as_ref().unwrap().vim.status())
+    }
+
+    fn cursor(&self, cx: &mut TestAppContext) -> usize {
+        cx.update(|cx| {
+            self.view
+                .read(cx)
+                .editor
+                .as_ref()
+                .unwrap()
+                .body
+                .read(cx)
+                .cursor()
+        })
+    }
+
+    fn is_open(&self, cx: &mut TestAppContext) -> bool {
+        cx.update(|cx| self.view.read(cx).editor.is_some())
+    }
+}
+
+// The body is "# Fix login\n\nNotes here."
+
+#[gpui_kit::test]
+fn vim_normal_mode_keys_move_and_edit_without_typing(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fx.open_with_vim(cx, "login.md");
+    assert_eq!(fx.vim_status(cx), "-- NORMAL --");
+    fx.keys(cx, "jj");
+    assert_eq!(fx.cursor(cx), 13, "two lines down");
+    assert_eq!(
+        fx.body(cx),
+        "# Fix login\n\nNotes here.",
+        "normal mode keys are not text"
+    );
+    fx.keys(cx, "w");
+    assert_eq!(fx.cursor(cx), 19);
+    fx.keys(cx, "$");
+    assert_eq!(
+        fx.cursor(cx),
+        23,
+        "shifted keys reach Vim as their character"
+    );
+    fx.keys(cx, "gg");
+    assert_eq!(fx.cursor(cx), 0);
+    fx.keys(cx, "G");
+    assert_eq!(fx.cursor(cx), 13);
+
+    fx.keys(cx, "dd");
+    assert_eq!(fx.body(cx), "# Fix login\n");
+    fx.keys(cx, "u");
+    assert_eq!(
+        fx.body(cx),
+        "# Fix login\n\nNotes here.",
+        "u is the editor's undo"
+    );
+    // After an undo the cursor is where the editor's own history leaves it, so go back.
+    fx.keys(cx, "ggjjdw");
+    assert_eq!(fx.body(cx), "# Fix login\n\nhere.");
+}
+
+#[gpui_kit::test]
+fn vim_insert_mode_types_and_escape_never_closes_the_card(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fx.open_with_vim(cx, "login.md");
+    fx.keys(cx, "GA");
+    assert_eq!(fx.vim_status(cx), "-- INSERT --");
+    fx.keys(cx, " dd jj typed");
+    assert_eq!(fx.body(cx), "# Fix login\n\nNotes here. dd jj typed");
+    // Enter and Backspace are the editor's again while inserting.
+    fx.press(cx, "enter");
+    fx.keys(cx, "nextt");
+    fx.press(cx, "backspace");
+    assert_eq!(fx.body(cx), "# Fix login\n\nNotes here. dd jj typed\nnext");
+
+    fx.press(cx, "escape");
+    assert_eq!(fx.vim_status(cx), "-- NORMAL --");
+    for _ in 0..3 {
+        fx.press(cx, "escape");
+    }
+    assert!(
+        fx.is_open(cx),
+        "Escape never closes the card while Vim is on"
+    );
+
+    // The edit still autosaves like any other.
+    fx.wait_for_autosave(cx);
+    assert!(
+        fx.read("login.md")
+            .ends_with("Notes here. dd jj typed\nnext\n")
+    );
+}
+
+#[gpui_kit::test]
+fn vim_normal_mode_blocks_the_editors_own_keys(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fx.open_with_vim(cx, "login.md");
+    fx.keys(cx, "jj");
+    for key in ["enter", "backspace", "delete", "tab"] {
+        fx.press(cx, key);
+    }
+    assert_eq!(fx.body(cx), "# Fix login\n\nNotes here.");
+}
+
+#[gpui_kit::test]
+fn vim_visual_search_and_ex_commands(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fx.open_with_vim(cx, "login.md");
+    fx.keys(cx, "jjve");
+    assert_eq!(fx.vim_status(cx), "-- VISUAL --");
+    cx.update(|cx| {
+        let editor = fx.view.read(cx).editor.as_ref().unwrap();
+        assert_eq!(
+            editor.body.read(cx).selected_range(),
+            13..18,
+            "the word is selected"
+        );
+    });
+    fx.keys(cx, "d");
+    assert_eq!(fx.body(cx), "# Fix login\n\n here.");
+
+    fx.keys(cx, "gg/here");
+    assert_eq!(fx.vim_status(cx), "/here");
+    fx.press(cx, "enter");
+    assert_eq!(fx.cursor(cx), 14);
+
+    // :w does nothing. :q closes the card, saving on the way out.
+    fx.keys(cx, ":w");
+    fx.press(cx, "enter");
+    assert!(fx.is_open(cx));
+    fx.keys(cx, ":q");
+    fx.press(cx, "enter");
+    assert!(!fx.is_open(cx));
+    assert!(fx.read("login.md").ends_with("# Fix login\n\n here.\n"));
+}
+
+#[gpui_kit::test]
+fn with_vim_off_the_editor_is_a_plain_editor(cx: &mut TestAppContext) {
+    let fx = open(cx);
+    fx.open_card(cx, "login.md");
+    fx.type_in_body(cx, " jj dd");
+    assert_eq!(fx.body(cx), "# Fix login\n\nNotes here. jj dd");
+    fx.press(cx, "escape");
+    assert!(!fx.is_open(cx), "Escape closes the card when Vim is off");
+}

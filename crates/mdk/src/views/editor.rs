@@ -15,7 +15,10 @@ use chrono::NaiveDate;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::calendar::Date as PickerDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
-use gpui_kit::component::input::{Editor, EditorState, Enter, Input, InputEvent, InputState};
+use gpui_kit::component::input::{
+    Backspace, Delete, Editor, EditorState, Enter, Escape, IndentInline, Input, InputEvent,
+    InputState, OutdentInline, Redo, Undo,
+};
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Sizable};
@@ -23,6 +26,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use mdk_format::{CardPatch, Priority, Status};
 use mdk_markdown::commands::{self, Edit, ListKind};
+use mdk_vim::{Handled, Mode, Vim, VimBuffer};
 use std::ops::Range;
 use std::time::Duration;
 
@@ -119,6 +123,8 @@ pub struct CardEditor {
     /// The file is gone from disk.
     pub deleted: bool,
     raw_open: bool,
+    /// Vim's state for this card. Used only while "Vim keys in editor" is on.
+    pub vim: Vim,
     save_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -189,6 +195,7 @@ impl CardEditor {
             conflict: false,
             deleted: false,
             raw_open: false,
+            vim: Vim::new(),
             save_task: None,
             _subscriptions: subscriptions,
         };
@@ -301,6 +308,71 @@ impl CardEditor {
         }
         mdk_format::apply_patch(&self.base.raw, file_name, &patch, &mdk_format::now_iso())
             .unwrap_or_else(|_| self.base.raw.to_string())
+    }
+}
+
+/// gpui-kit's editor, as the buffer Vim edits.
+struct EditorBuffer<'a, 'b> {
+    state: &'a mut EditorState,
+    window: &'a mut Window,
+    cx: &'a mut Context<'b, EditorState>,
+}
+
+impl VimBuffer for EditorBuffer<'_, '_> {
+    fn text(&self) -> String {
+        self.state.value().to_string()
+    }
+
+    fn cursor(&self) -> usize {
+        self.state.cursor()
+    }
+
+    fn set_cursor(&mut self, pos: usize) {
+        self.state.set_selected_range(pos..pos, self.cx);
+    }
+
+    fn set_selection(&mut self, range: Range<usize>) {
+        self.state.set_selected_range(range, self.cx);
+    }
+
+    fn replace(&mut self, range: Range<usize>, text: &str) {
+        self.state.set_selected_range(range, self.cx);
+        self.state.replace(text.to_string(), self.window, self.cx);
+    }
+
+    // The editor's history is private, so undo and redo go through its own actions.
+    fn undo(&mut self) {
+        self.window.dispatch_action(Box::new(Undo), self.cx);
+    }
+
+    fn redo(&mut self) {
+        self.window.dispatch_action(Box::new(Redo), self.cx);
+    }
+}
+
+/// The key as Vim names it: the character typed, or the key's name.
+fn vim_key(keystroke: &Keystroke) -> Option<String> {
+    let m = keystroke.modifiers;
+    if m.platform || m.alt || m.function {
+        return None;
+    }
+    if m.control {
+        return (keystroke.key == "r").then(|| "ctrl-r".to_string());
+    }
+    match keystroke.key_char.as_deref() {
+        Some(typed) if typed.chars().count() == 1 && !typed.chars().any(char::is_control) => {
+            Some(typed.to_string())
+        }
+        _ => match keystroke.key.as_str() {
+            "escape" | "enter" | "backspace" => Some(keystroke.key.clone()),
+            "space" => Some(" ".to_string()),
+            key if key.chars().count() == 1 => Some(if m.shift {
+                key.to_uppercase()
+            } else {
+                key.to_string()
+            }),
+            _ => None,
+        },
     }
 }
 
@@ -536,6 +608,56 @@ impl Mdk {
         });
     }
 
+    /// Whether Vim owns the body editor's keys right now.
+    fn vim_on(&self) -> bool {
+        self.prefs.vim_keys && self.editor.as_ref().is_some_and(|e| !e.raw_mode)
+    }
+
+    /// Give a key to Vim. Returns true when Vim used it, so the editor must not.
+    pub fn vim_handle(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.vim_on() {
+            return false;
+        }
+        let Some(editor) = &mut self.editor else {
+            return false;
+        };
+        let (vim, body) = (&mut editor.vim, editor.body.clone());
+        let handled = body.update(cx, |state, cx| {
+            vim.handle(key, &mut EditorBuffer { state, window, cx })
+        });
+        cx.notify();
+        match handled {
+            Handled::Yes => true,
+            Handled::No => false,
+            Handled::Close => {
+                self.close_editor(window, cx);
+                true
+            }
+        }
+    }
+
+    /// Outside insert mode, a key the editor has bound (Enter, Backspace, Tab, Delete) must
+    /// not reach it. `key` is what Vim should see, if anything.
+    fn vim_blocks(
+        &mut self,
+        key: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.vim_on()
+            || self
+                .editor
+                .as_ref()
+                .is_some_and(|e| e.vim.mode() == Mode::Insert)
+        {
+            return false;
+        }
+        if let Some(key) = key {
+            self.vim_handle(key, window, cx);
+        }
+        true
+    }
+
     /// Enter in the body: continue the list the cursor is in. False when it is not in one.
     fn continue_list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(editor) = self.editor.as_ref().filter(|e| !e.raw_mode) else {
@@ -684,9 +806,45 @@ impl Mdk {
             .on_action(cx.listener(|this, _: &FormatCode, window, cx| {
                 this.format(Tool::Wrap("`"), window, cx)
             }))
+            // Vim sees plain keys before the editor does. GPUI runs key bindings before
+            // key-down listeners, so the keys the editor has bound are caught as actions.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if let Some(key) = vim_key(&event.keystroke)
+                    && this.vim_handle(&key, window, cx)
+                {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                // With Vim on, Escape belongs to Vim and never closes the card.
+                if this.vim_on() {
+                    this.vim_handle("escape", window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Backspace, window, cx| {
+                if this.vim_blocks(Some("backspace"), window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Delete, window, cx| {
+                if this.vim_blocks(None, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
+                if this.vim_blocks(None, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
+                if this.vim_blocks(None, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             // Enter on a list line starts the next item. Anywhere else the editor handles it.
             .capture_action(cx.listener(|this, _: &Enter, window, cx| {
-                if this.continue_list(window, cx) {
+                if this.vim_blocks(Some("enter"), window, cx) || this.continue_list(window, cx) {
                     cx.stop_propagation();
                 }
             }))
@@ -704,7 +862,20 @@ impl Mdk {
                     .text_size(px(13.))
                     .flex_1()
                     .min_h_0(),
-            );
+            )
+            .when(self.vim_on(), |d| {
+                d.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .border_t_1()
+                        .border_color(c.border)
+                        .font_family(mono.clone())
+                        .text_size(px(11.))
+                        .text_color(c.muted_fg)
+                        .child(editor.vim.status()),
+                )
+            });
 
         let preview = div()
             .id("editor-preview")

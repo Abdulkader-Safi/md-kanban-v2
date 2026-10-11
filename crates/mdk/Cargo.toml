@@ -10,6 +10,7 @@ gpui-kit = { workspace = true, features = ["tree-sitter-markdown", "tree-sitter-
 mdk-format = { path = "../mdk-format" }
 mdk-markdown = { path = "../mdk-markdown" }
 mdk-store = { path = "../mdk-store" }
+mdk-vim = { path = "../mdk-vim" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 directories = "=6.0.0"
 futures = "0.3"

@@ -9,7 +9,8 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M2 app shell and read-only board: built and tested headless. The side-by-side look check against the Electron screenshot is still open
 - M3 moving and creating: built and tested headless, CI green on three OSes (run for `7aed244`). The cross-check in the running Electron app is open
 - M4 card editor and markdown editor: built and tested headless
-- M5 to M8: not started
+- M5 Vim mode: built and tested, table tests for every FR-VIM-02 command. The manual check in the real window is open
+- M6 to M8: not started
 
 ## Decisions and deviations
 
@@ -29,6 +30,27 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M5 notes
+
+Built: the `mdk-vim` crate, a state machine over a `VimBuffer` trait with no UI in it; an adapter that makes gpui-kit's editor a `VimBuffer`; the mode line under the editor; the sidebar's "Vim keys in editor" switch now does something.
+
+Checked:
+
+- `crates/mdk-vim/tests/vim.rs`, 11 test groups with about 150 keystroke cases on a plain string buffer: every motion, counts, `i a I A o O`, `x dd yy p P`, `u` and `Ctrl-r`, `d c y` with each motion and doubled, visual and visual-line `d y c x > <`, `/` with `n` and `N`, `:w` and `:q`, the status line, and text with wide characters.
+- `crates/mdk/tests/editor.rs`, 5 tests in the real editor: normal-mode keys move and edit and are never typed as text; shifted keys (`$`, `G`, `A`) reach Vim; insert mode types, and Enter and Backspace work there; Escape never closes the card with Vim on; Enter, Backspace, Delete and Tab do nothing in normal mode; visual select and delete; search; `:q` closes and saves; with Vim off the editor is plain and Escape closes.
+
+Not checked: Vim by hand in the real window. On macOS a plain key can reach the input method before GPUI's key-down listeners in some setups, which the headless harness cannot show.
+
+Decisions:
+
+- Plain keys are taken with `capture_key_down`. The keys the editor has bound (Escape, Enter, Backspace, Delete, Tab) are taken with `capture_action`, as found in M0.
+- `u` and `Ctrl-r` dispatch the editor's own Undo and Redo, because its history is private. After an undo the cursor is where the editor's history leaves it, not where Vim would put it.
+- A `cw` followed by typing is more than one undo step. Vim makes it one.
+- The cursor in normal mode is the editor's bar, not a block.
+- `>` and `<` shift by two spaces.
+- Search is a plain, case-sensitive substring search that wraps.
+- While fixing broken frontmatter in the raw file, Vim is off.
 
 ## M4 notes
 

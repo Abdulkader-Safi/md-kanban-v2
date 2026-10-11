@@ -4025,6 +4025,7 @@ dependencies = [
  "mdk-format",
  "mdk-markdown",
  "mdk-store",
+ "mdk-vim",
  "serde",
  "serde_json",
  "tempfile",
@@ -4054,6 +4055,10 @@ dependencies = [
  "notify-debouncer-full",
  "tempfile",
 ]
+
+[[package]]
+name = "mdk-vim"
+version = "0.1.0"
 
 [[package]]
 name = "memchr"
