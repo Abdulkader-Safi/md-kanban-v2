@@ -243,9 +243,7 @@ impl Mdk {
     }
 
     fn watch(&mut self, id: &str, store: &Store) {
-        if self.watchers.contains_key(id)
-            || std::env::var_os("MDK_NO_WATCH").is_some_and(|v| v == "1")
-        {
+        if !self.watch_enabled || self.watchers.contains_key(id) {
             return;
         }
         let (tx, project) = (self.events.clone(), id.to_string());
