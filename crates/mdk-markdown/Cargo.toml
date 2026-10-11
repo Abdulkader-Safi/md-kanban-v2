@@ -1,0 +1,9 @@
+[package]
+name = "mdk-markdown"
+description = "Markdown editing commands for a formatting toolbar. No UI in here."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+regex = "1"

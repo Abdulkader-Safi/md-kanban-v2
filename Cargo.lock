@@ -4039,6 +4039,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdk-markdown"
+version = "0.1.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "mdk-store"
 version = "0.1.0"
 dependencies = [
