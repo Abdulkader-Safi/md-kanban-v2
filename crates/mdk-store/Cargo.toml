@@ -1,0 +1,13 @@
+[package]
+name = "mdk-store"
+description = "File access for a folder of markdown cards: scan, guarded reads, atomic writes, live watching."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+notify.workspace = true
+notify-debouncer-full.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

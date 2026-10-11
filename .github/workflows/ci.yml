@@ -17,6 +17,16 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      # M0: only the file spike runs in CI. The GPUI spikes need a window.
-      - run: cargo clippy -p file-spike --all-targets -- -D warnings
+      # The default members are the crates in crates/. The UI spikes need a window and
+      # GPUI's system libraries, so they are left out. The file spike runs everywhere.
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
       - run: cargo test -p file-spike
+
+  deny:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources

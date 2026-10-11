@@ -8,14 +8,14 @@ mdk is a Rust rebuild of [MD Kanban](https://github.com/Abdulkader-Safi/md-kanba
 
 In progress. The build follows `resources/06-build-spec.md`, milestone by milestone, and `PROGRESS.md` has the current state.
 
-- Done: the M0 spikes (file watching, drag and drop, Vim keys, markdown preview) and the card format crate.
+- Done: the M0 spikes (file watching, drag and drop, Vim keys, markdown preview), the card format crate and the file store crate.
 - Not built yet: the app window. There is no `mdk` binary to run so far.
 
 ## What you need
 
-- Rust stable, 1.90 or newer (`rustup update stable`).
+- Rust stable, 1.89 or newer (`rustup update stable`). Built so far with 1.97.1.
 - macOS 13+ on Apple Silicon, Windows 10 or 11, or Linux (X11 or Wayland). Development happens on macOS.
-- On Linux, GPUI's system libraries. On Ubuntu: `sudo apt install libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libasound2-dev`.
+- On Linux, GPUI needs its system libraries (see [gpui-kit.com](https://gpui-kit.com)). The window code has not been run on Linux or Windows yet. Only the file watcher is tested there, in CI.
 - [bun](https://bun.sh), only to regenerate the card fixtures.
 
 ## Run the tests
@@ -54,6 +54,7 @@ cargo run -p mdk
 ## Layout
 
 - `crates/mdk-format`: the card format. Parse and write card files, quick-add, due labels.
+- `crates/mdk-store`: file access for a project folder. Scan, guarded reads, atomic writes, live watching.
 - `spikes/`: the M0 spikes.
 - `resources/`: the product and build spec.
 - `PROGRESS.md`: milestone log, decisions and deviations from the spec.

@@ -1,0 +1,42 @@
+# cargo-deny: licences must be compatible with MIT (NFR-10), and no HTTP client may
+# be compiled into mdk on the platforms it ships for (NFR-02).
+
+[graph]
+# Only the three desktop targets count. gpui-kit pulls an HTTP client for other targets.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "OFL-1.1",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "allow"
+deny = [
+    { crate = "reqwest", reason = "mdk makes no network requests" },
+    { crate = "gpui-pre-reqwest", reason = "mdk makes no network requests" },
+    { crate = "ureq", reason = "mdk makes no network requests" },
+    { crate = "hyper", reason = "mdk makes no network requests" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
