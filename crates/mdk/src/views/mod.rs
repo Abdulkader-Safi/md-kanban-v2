@@ -3,16 +3,22 @@
 
 mod board_view;
 pub mod editor;
+mod filter_bar;
+mod list_view;
 mod new_card;
+mod palette;
 mod sidebar;
 
 pub use editor::CardEditor;
 pub use new_card::NewCardForm;
 
 use crate::app::{
-    Confirm, DragCard, FocusDown, FocusLeft, FocusRight, FocusUp, Mdk, NewCardKey, OpenFocused,
-    PickUp, Redo, Undo,
+    ArchiveDone, Confirm, ConnectFolder, DragCard, FocusDown, FocusLeft, FocusRight, FocusUp, Mdk,
+    NewCardKey, OpenFocused, OpenSettings, PickUp, Redo, RescanAll, ShowBoard, ShowList,
+    TogglePalette, ToggleTheme, ToggleVim, Undo,
 };
+use crate::board::Command;
+use crate::prefs::ViewChoice;
 use crate::theme::icon;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
@@ -79,6 +85,39 @@ impl Render for Mdk {
             .on_action(cx.listener(Self::close_top))
             .on_action(cx.listener(|this, _: &Undo, _, cx| this.undo(cx)))
             .on_action(cx.listener(|this, _: &Redo, _, cx| this.redo(cx)))
+            .on_action(
+                cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.run_command(Command::Settings, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ConnectFolder, window, cx| {
+                this.run_command(Command::ConnectFolder, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RescanAll, window, cx| {
+                this.run_command(Command::RescanAll, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleTheme, window, cx| {
+                this.run_command(Command::ToggleTheme, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleVim, window, cx| {
+                this.run_command(Command::ToggleVim, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowBoard, window, cx| {
+                this.run_command(Command::BoardView, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowList, window, cx| {
+                this.run_command(Command::ListView, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ArchiveDone, window, cx| {
+                this.run_command(Command::ArchiveDone, window, cx)
+            }))
+            // A folder dropped on the window becomes a project.
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                for path in paths.paths().iter().filter(|p| p.is_dir()) {
+                    this.connect(path, cx);
+                }
+            }))
             .relative()
             .size_full()
             .flex()
@@ -87,6 +126,9 @@ impl Render for Mdk {
             .text_color(c.fg)
             .font_family(font)
             .text_sm()
+            .when_some(self.menu_bar.clone(), |d, menu_bar| {
+                d.child(div().border_b_1().border_color(c.border).child(menu_bar))
+            })
             .child(self.header(narrow, c, cx))
             .child(
                 div()
@@ -116,6 +158,10 @@ impl Render for Mdk {
             })
             .when_some(self.new_card.as_ref(), |d, form| {
                 d.child(self.new_card_dialog(form, c, cx))
+            })
+            .when(self.settings_open, |d| d.child(self.settings_dialog(c, cx)))
+            .when(self.palette.is_some(), |d| {
+                d.child(self.palette_view(c, cx))
             })
             .when_some(self.confirm.as_ref(), |d, confirm| {
                 d.child(self.confirm_dialog(confirm, c, cx))
@@ -239,13 +285,12 @@ impl Mdk {
                 )
             })
             .child(div().flex_1())
-            // The palette arrives in M7.
             .child(
                 Button::new("search")
                     .outline()
                     .small()
                     .label(search)
-                    .disabled(true),
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_palette(window, cx))),
             )
             .child(
                 Button::new("theme")
@@ -279,9 +324,12 @@ impl Mdk {
                 .into_any_element()
         } else if self.columns.iter().all(Vec::is_empty) {
             self.no_cards(c, cx).into_any_element()
+        } else if self.prefs.view == ViewChoice::List {
+            self.list_view(c, cx).into_any_element()
         } else {
             self.board_view(c, cx).into_any_element()
         };
+        let has_projects = !self.board.projects.is_empty();
 
         div()
             .id("board-area")
@@ -330,6 +378,7 @@ impl Mdk {
                         ),
                 )
             })
+            .when(has_projects, |d| d.child(self.filter_bar(c, cx)))
             .child(body)
     }
 

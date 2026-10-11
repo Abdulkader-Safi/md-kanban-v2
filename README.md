@@ -11,9 +11,10 @@ In progress. The build follows `resources/06-build-spec.md`, milestone by milest
 - Works today: connect folders, see their cards in five columns, filter by project and work folder, and watch the board update when another program edits a card file. Drag cards between columns, move them with the "⋯" menu or the keyboard, create cards with quick-add (`Fix login p1 #backend @safi due:friday`), archive done cards, and undo any of it. Click a card to edit it: fields, a markdown editor with a formatting toolbar, and autosave. If an agent changes the file while you have unsaved edits, mdk asks which version to keep.
 - Vim keys in the card editor (switch in the sidebar): normal, insert and visual modes, `h j k l w b e 0 ^ $ gg G` with counts, `d c y` with motions, `x dd yy p P u Ctrl-r`, `/` search, `:q`.
 - The Preview tab renders the card: tables, task lists, code with a Copy button, maths (`$x^2$`), Mermaid diagrams, GitHub and Obsidian callouts, `==highlights==`, `[[wikilinks]]` that open the card, and images from the project folder. A Subtasks box on top lets you tick checkboxes.
-- Not built yet: filters and saved views, the list view, the command palette, release builds.
+- Filter the board by text, priority, assignee, label and due date, save filter sets as views per project, switch to a sortable list, and use the command palette (Cmd or Ctrl+K) to find a card, create one, move the open one, or run a command.
+- Not built yet: the sample project, release builds for download, and the size and speed numbers against Electron.
 
-Keys on the board: arrows move between cards, Enter opens one, Space picks a card up and drops it, Esc cancels, `N` makes a new card, Cmd or Ctrl+Z undoes and Shift+Z redoes.
+Keys on the board: arrows move between cards, Enter opens one, Space picks a card up and drops it, Esc cancels, `N` makes a new card, Cmd or Ctrl+Z undoes and Shift+Z redoes, Cmd or Ctrl+K opens the palette, Cmd or Ctrl+comma opens settings.
 
 ## What you need
 

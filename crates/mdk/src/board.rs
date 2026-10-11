@@ -141,6 +141,158 @@ fn new_id(seed: &Path) -> ProjectId {
         .collect()
 }
 
+/// Which due dates the board shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DueFilter {
+    #[default]
+    All,
+    Overdue,
+    Today,
+    /// Due today or in the next six days.
+    Week,
+    /// Cards with no due date.
+    None,
+}
+
+impl DueFilter {
+    pub const ALL: [DueFilter; 5] = [
+        DueFilter::All,
+        DueFilter::Overdue,
+        DueFilter::Today,
+        DueFilter::Week,
+        DueFilter::None,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DueFilter::All => "any due",
+            DueFilter::Overdue => "overdue",
+            DueFilter::Today => "today",
+            DueFilter::Week => "this week",
+            DueFilter::None => "no date",
+        }
+    }
+
+    /// The word used in the config file.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DueFilter::All => "all",
+            DueFilter::Overdue => "overdue",
+            DueFilter::Today => "today",
+            DueFilter::Week => "week",
+            DueFilter::None => "none",
+        }
+    }
+
+    pub fn parse(s: &str) -> DueFilter {
+        DueFilter::ALL
+            .into_iter()
+            .find(|d| d.as_str() == s)
+            .unwrap_or_default()
+    }
+}
+
+/// The filter bar's state. Empty values filter nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Filters {
+    /// Matches title, body, id, assignee and labels, ignoring case.
+    pub query: String,
+    /// Any of these. Empty means every priority.
+    pub priorities: Vec<Priority>,
+    /// The exact assignee, ignoring case.
+    pub assignee: String,
+    pub label: Option<String>,
+    pub due: DueFilter,
+}
+
+impl Filters {
+    pub fn is_active(&self) -> bool {
+        *self != Filters::default()
+    }
+
+    fn matches(&self, card: &Card, today: Date) -> bool {
+        let data = &card.data;
+        let query = self.query.trim().to_lowercase();
+        if !query.is_empty() && !card.search_text.contains(&query) {
+            return false;
+        }
+        if !self.priorities.is_empty() && !self.priorities.contains(&data.priority) {
+            return false;
+        }
+        let assignee = self.assignee.trim();
+        if !assignee.is_empty() && data.assignee.to_lowercase() != assignee.to_lowercase() {
+            return false;
+        }
+        if self
+            .label
+            .as_ref()
+            .is_some_and(|label| !data.labels.contains(label))
+        {
+            return false;
+        }
+        // A due value that is not a date matches only "any" and "no date" never.
+        let due = data.due_date.as_deref().map(Date::parse);
+        let days = due.flatten().map(|date| date.days() - today.days());
+        match self.due {
+            DueFilter::All => true,
+            DueFilter::Overdue => days.is_some_and(|d| d < 0),
+            DueFilter::Today => days == Some(0),
+            DueFilter::Week => days.is_some_and(|d| (0..7).contains(&d)),
+            DueFilter::None => data.due_date.is_none(),
+        }
+    }
+}
+
+/// An app command the palette can run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Command {
+    ConnectFolder,
+    RescanAll,
+    ToggleTheme,
+    ToggleVim,
+    BoardView,
+    ListView,
+    ArchiveDone,
+    Settings,
+}
+
+impl Command {
+    pub const ALL: [Command; 8] = [
+        Command::ConnectFolder,
+        Command::RescanAll,
+        Command::ToggleTheme,
+        Command::ToggleVim,
+        Command::BoardView,
+        Command::ListView,
+        Command::ArchiveDone,
+        Command::Settings,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Command::ConnectFolder => "Connect folder",
+            Command::RescanAll => "Rescan all",
+            Command::ToggleTheme => "Toggle theme",
+            Command::ToggleVim => "Toggle Vim keys",
+            Command::BoardView => "Board view",
+            Command::ListView => "List view",
+            Command::ArchiveDone => "Archive done cards",
+            Command::Settings => "Settings",
+        }
+    }
+}
+
+/// One row of the command palette.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaletteItem {
+    Card(CardKey),
+    /// Create a card with this title (quick-add syntax works).
+    Create(String),
+    /// Move the open card to this column.
+    Move(Status),
+    Command(Command),
+}
+
 #[derive(Default)]
 pub struct Board {
     pub projects: Vec<Project>,
@@ -149,6 +301,9 @@ pub struct Board {
     pub selected_project: Option<ProjectId>,
     /// `None` is "all" work folders.
     pub selected_workspace: Option<String>,
+    pub filters: Filters,
+    /// The date the due filters and labels count from. The app keeps it current.
+    pub today: Option<Date>,
     undo: Vec<UndoEntry>,
     redo: Vec<UndoEntry>,
 }
@@ -785,13 +940,18 @@ impl Board {
         self.cards.len()
     }
 
-    /// The cards the selection shows, sorted by `order`. Equal orders sort by path, so the
-    /// board does not shuffle between refreshes.
+    /// The cards the selection and the filters show, sorted by `order`. Equal orders sort
+    /// by path, so the board does not shuffle between refreshes.
     pub fn visible_cards(&self) -> Vec<&Card> {
+        let today = self.today.unwrap_or(Date {
+            year: 1970,
+            month: 1,
+            day: 1,
+        });
         let mut cards: Vec<&Card> = self
             .cards
             .values()
-            .filter(|c| self.in_selection(c))
+            .filter(|c| self.in_selection(c) && self.filters.matches(c, today))
             .collect();
         cards.sort_by(|a, b| {
             a.data
@@ -800,6 +960,62 @@ impl Board {
                 .then_with(|| a.key.cmp(&b.key))
         });
         cards
+    }
+
+    /// The labels of the cards in the selection, sorted. Filters do not narrow this list.
+    pub fn labels_in_view(&self) -> Vec<String> {
+        let labels: BTreeSet<&str> = self
+            .cards
+            .values()
+            .filter(|c| self.in_selection(c))
+            .flat_map(|c| c.data.labels.iter().map(String::as_str))
+            .collect();
+        labels.into_iter().map(str::to_string).collect()
+    }
+
+    /// The command palette's rows for a query: up to 8 matching cards, then "create card"
+    /// when there is a query, then moves for the open card, then app commands.
+    pub fn palette_items(&self, query: &str, open_card: Option<&CardKey>) -> Vec<PaletteItem> {
+        let needle = query.trim().to_lowercase();
+        let mut cards: Vec<&Card> = self
+            .cards
+            .values()
+            .filter(|c| c.workspace != "archive" && c.search_text.contains(&needle))
+            .collect();
+        // Title matches first, then by order, so the list is stable while typing.
+        cards.sort_by(|a, b| {
+            let title = |c: &Card| !c.data.title.to_lowercase().contains(&needle);
+            (title(a), a.data.order, &a.key)
+                .partial_cmp(&(title(b), b.data.order, &b.key))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut items: Vec<PaletteItem> = cards
+            .into_iter()
+            .take(8)
+            .map(|c| PaletteItem::Card(c.key.clone()))
+            .collect();
+        if !needle.is_empty() {
+            items.push(PaletteItem::Create(query.trim().to_string()));
+        }
+        if let Some(card) = open_card.and_then(|key| self.card(key)) {
+            let moves = Status::ALL.into_iter().filter(|s| *s != card.data.status);
+            items.extend(
+                moves
+                    .filter(|s| {
+                        format!("move open card to {}", s.name())
+                            .to_lowercase()
+                            .contains(&needle)
+                    })
+                    .map(PaletteItem::Move),
+            );
+        }
+        items.extend(
+            Command::ALL
+                .into_iter()
+                .filter(|c| c.label().to_lowercase().contains(&needle))
+                .map(PaletteItem::Command),
+        );
+        items
     }
 
     pub fn column(&self, status: Status) -> Vec<&Card> {

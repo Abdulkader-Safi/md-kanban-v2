@@ -11,7 +11,8 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - M4 card editor and markdown editor: built and tested headless
 - M5 Vim mode: built and tested, table tests for every FR-VIM-02 command, CI green on three OSes (run for `5888e2a`). The manual check in the real window is open
 - M6 preview: built and tested headless
-- M7 and M8: not started
+- M7 filters, views, list and palette: built and tested headless
+- M8: not started
 
 ## Decisions and deviations
 
@@ -31,6 +32,25 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - The store does not depend on `mdk-format`. `Store::update` takes a closure, and the Board passes `mdk_format::apply_patch` to it. Both crates stay usable on their own (NFR-09).
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
+
+## M7 notes
+
+Built: the filter bar (search across title, body, id, assignee and labels; four priority chips; assignee; labels and due dropdowns; reset; a filtered or all badge), saved views per project with chips and a delete cross, the Board and List switch, the list view with sortable headers, the command palette on Cmd or Ctrl+K (up to 8 cards, "Create card", "Move open card to", and the app commands), the settings dialog on Cmd or Ctrl+comma, the native menu on macOS and gpui-kit's menu bar in the window on Windows and Linux, and connecting a folder by dropping it on the window.
+
+Checked:
+
+- `crates/mdk/tests/board_queries.rs`, 6 tests: each filter alone and combined, with Electron's rules; the label list follows the selection and not the filters; a saved view survives the config file; the palette's items, their order and the cap of 8 cards.
+- `crates/mdk/tests/app.rs`, 6 more tests in a headless window: typing in the search box filters every column; chips and dropdowns combine; a filter that hides everything shows the empty state; saved views belong to their project and persist; the list view shows, sorts and opens with the keyboard; the palette opens a card, moves the open card and creates a card with quick-add; Up and Down stop at the ends; the settings shortcut; an app command run from the palette.
+
+Not checked: the native macOS menu and the in-window menu bar (neither exists in a headless window), dropping a folder from the OS, the two dropdowns' placement on screen, and "every shortcut works on all three OSes" by hand.
+
+Decisions:
+
+- "This week" is due today or in the next six days, by date. Electron compares milliseconds from now.
+- The palette lists title matches first, then by board order, and leaves archived cards out. "Create card" from the palette understands quick-add words and opens the new card.
+- A list header click sorts ascending, a second click descending, a third goes back to board order.
+- The labels and due dropdowns are hand-built, like the card's move menu.
+- In list view, Up and Down move the focused row and Enter opens it.
 
 ## M6 notes
 

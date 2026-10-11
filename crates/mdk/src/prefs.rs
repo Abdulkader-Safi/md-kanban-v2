@@ -38,6 +38,52 @@ pub struct SavedProject {
     pub root: PathBuf,
 }
 
+/// A named set of filters, as kept in the config file.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedView {
+    pub name: String,
+    pub query: String,
+    /// Priority names: `critical`, `high`, `medium`, `low`.
+    pub priorities: Vec<String>,
+    pub assignee: String,
+    /// Empty for every label.
+    pub label: String,
+    /// `all`, `overdue`, `today`, `week` or `none`.
+    pub due: String,
+}
+
+impl SavedView {
+    pub fn new(name: &str, filters: &crate::board::Filters) -> SavedView {
+        SavedView {
+            name: name.trim().to_string(),
+            query: filters.query.clone(),
+            priorities: filters
+                .priorities
+                .iter()
+                .map(|p| p.as_str().to_string())
+                .collect(),
+            assignee: filters.assignee.clone(),
+            label: filters.label.clone().unwrap_or_default(),
+            due: filters.due.as_str().to_string(),
+        }
+    }
+
+    pub fn filters(&self) -> crate::board::Filters {
+        crate::board::Filters {
+            query: self.query.clone(),
+            priorities: self
+                .priorities
+                .iter()
+                .filter_map(|p| mdk_format::Priority::parse(p))
+                .collect(),
+            assignee: self.assignee.clone(),
+            label: Some(self.label.clone()).filter(|l| !l.is_empty()),
+            due: crate::board::DueFilter::parse(&self.due),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
     pub x: f32,
@@ -62,8 +108,8 @@ pub struct Prefs {
     pub view: ViewChoice,
     pub editor_tab: EditorTab,
     pub editor_expanded: bool,
-    /// Saved filter views per project id, or `"all"`. Filled in M7.
-    pub saved_views: BTreeMap<String, Vec<serde_json::Value>>,
+    /// Saved filter views per project id, or `"all"` for All projects.
+    pub saved_views: BTreeMap<String, Vec<SavedView>>,
     pub window: Option<WindowState>,
 }
 

@@ -477,3 +477,277 @@ fn archive_asks_first_and_moves_the_done_cards(cx: &mut TestAppContext) {
         Some(("Archived 1 cards to archive/".into(), true))
     );
 }
+
+// ---- M7: filters, saved views, list view, palette, shortcuts --------------------------------
+
+use mdk::app::ListColumn;
+use mdk::board::{DueFilter, Filters};
+use mdk::prefs::ViewChoice;
+use mdk_format::Priority;
+
+fn with_view<R>(
+    cx: &mut TestAppContext,
+    f: &Fixture,
+    run: impl FnOnce(&mut Mdk, &mut gpui_kit::Window, &mut gpui_kit::Context<Mdk>) -> R,
+) -> R {
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.view.update(cx, |view, cx| run(view, window, cx))
+    })
+    .unwrap()
+}
+
+fn type_text(cx: &mut TestAppContext, f: &Fixture, text: &str) {
+    cx.update_window(f.window.into(), |_, window, cx| window.input(text, cx))
+        .unwrap();
+    cx.run_until_parked();
+}
+
+fn mod_key(key: &str) -> String {
+    format!(
+        "{}-{key}",
+        if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "ctrl"
+        }
+    )
+}
+
+fn all_titles(cx: &mut TestAppContext, f: &Fixture) -> Vec<String> {
+    cx.update(|cx| {
+        f.view
+            .read(cx)
+            .board
+            .visible_cards()
+            .iter()
+            .map(|c| c.data.title.clone())
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn typing_in_the_search_box_filters_every_column(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    with_view(cx, &f, |view, window, cx| {
+        let search = view.search.clone();
+        search.update(cx, |state, cx| state.focus(window, cx));
+    });
+    type_text(cx, &f, "LOGOUT");
+    settle(cx, &f);
+    assert_eq!(all_titles(cx, &f), ["Fix logout"]);
+    assert_eq!(column(cx, &f, Status::Todo), ["Fix logout"]);
+    assert!(column(cx, &f, Status::Review).is_empty());
+    cx.update(|cx| assert!(f.view.read(cx).board.filters.is_active()));
+
+    // Reset clears the box as well as the filter.
+    with_view(cx, &f, |view, window, cx| {
+        view.set_filters(Filters::default(), window, cx)
+    });
+    settle(cx, &f);
+    assert_eq!(all_titles(cx, &f).len(), 4);
+    cx.update(|cx| assert_eq!(f.view.read(cx).search.read(cx).value(), ""));
+}
+
+#[gpui_kit::test]
+fn chips_and_dropdowns_combine_and_a_filter_that_hides_all_shows_the_empty_state(
+    cx: &mut TestAppContext,
+) {
+    let f = open(cx, false, connected);
+    // Every fixture card is high priority and due 2026-01-01, long overdue.
+    with_view(cx, &f, |view, _, cx| {
+        view.toggle_priority_filter(Priority::High, cx);
+        view.board.filters.due = DueFilter::Overdue;
+        view.changed(cx);
+    });
+    settle(cx, &f);
+    assert_eq!(
+        all_titles(cx, &f),
+        ["Fix login", "Fix logout", "Drag cards"]
+    );
+    with_view(cx, &f, |view, _, cx| {
+        view.toggle_priority_filter(Priority::High, cx);
+        view.toggle_priority_filter(Priority::Low, cx);
+    });
+    settle(cx, &f);
+    assert!(
+        all_titles(cx, &f).is_empty(),
+        "the board shows \"No cards match\""
+    );
+}
+
+#[gpui_kit::test]
+fn saved_views_belong_to_a_project_and_persist(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    with_view(cx, &f, |view, window, cx| {
+        view.select_project(Some("testproj".into()), cx);
+        let filters = Filters {
+            query: "login".into(),
+            priorities: vec![Priority::High],
+            ..Default::default()
+        };
+        view.set_filters(filters, window, cx);
+        view.save_view("my logins", cx);
+        view.set_filters(Filters::default(), window, cx);
+    });
+    assert_eq!(all_titles(cx, &f).len(), 4);
+    with_view(cx, &f, |view, window, cx| view.apply_view(0, window, cx));
+    settle(cx, &f);
+    assert_eq!(all_titles(cx, &f), ["Fix login"]);
+    cx.update(|cx| assert_eq!(f.view.read(cx).search.read(cx).value(), "login"));
+
+    // The view is under its project, not under "All projects".
+    with_view(cx, &f, |view, _, cx| {
+        view.save_now();
+        view.select_project(None, cx);
+    });
+    cx.update(|cx| assert!(f.view.read(cx).saved_views().is_empty()));
+    let (saved, _) = Prefs::load(f.config.path());
+    assert_eq!(saved.saved_views["testproj"][0].name, "my logins");
+    assert_eq!(
+        saved.saved_views["testproj"][0].filters().priorities,
+        [Priority::High]
+    );
+
+    with_view(cx, &f, |view, _, cx| {
+        view.select_project(Some("testproj".into()), cx);
+        view.delete_view(0, cx);
+        view.save_now();
+    });
+    assert!(Prefs::load(f.config.path()).0.saved_views.is_empty());
+}
+
+#[gpui_kit::test]
+fn the_list_view_shows_sorts_and_opens_cards(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    with_view(cx, &f, |view, _, cx| view.set_view(ViewChoice::List, cx));
+    settle(cx, &f);
+    let rows = |cx: &mut TestAppContext| -> Vec<String> {
+        cx.update(|cx| {
+            let view = f.view.read(cx);
+            view.list_rows
+                .iter()
+                .map(|key| view.board.card(key).unwrap().data.title.clone())
+                .collect()
+        })
+    };
+    assert_eq!(
+        rows(cx),
+        ["Broken", "Fix login", "Fix logout", "Drag cards"],
+        "board order"
+    );
+    with_view(cx, &f, |view, _, cx| {
+        view.sort_list_by(ListColumn::Title, cx)
+    });
+    assert_eq!(
+        rows(cx),
+        ["Broken", "Drag cards", "Fix login", "Fix logout"]
+    );
+    with_view(cx, &f, |view, _, cx| {
+        view.sort_list_by(ListColumn::Title, cx)
+    });
+    assert_eq!(
+        rows(cx),
+        ["Fix logout", "Fix login", "Drag cards", "Broken"]
+    );
+    with_view(cx, &f, |view, _, cx| {
+        view.sort_list_by(ListColumn::Title, cx)
+    });
+    assert_eq!(
+        rows(cx)[0],
+        "Broken",
+        "a third click goes back to board order"
+    );
+    settle(cx, &f);
+
+    // Down, Down, Enter opens the second row.
+    press(cx, &f, &["down", "down", "enter"]);
+    cx.update(|cx| {
+        let view = f.view.read(cx);
+        assert_eq!(
+            view.open_card.as_ref().map(|k| k.rel_path.as_str()),
+            Some("backend/login.md")
+        );
+    });
+    with_view(cx, &f, |view, _, _| view.save_now());
+    assert_eq!(Prefs::load(f.config.path()).0.view, ViewChoice::List);
+}
+
+#[gpui_kit::test]
+fn the_palette_finds_opens_creates_and_moves(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    press(cx, &f, &[&mod_key("k")]);
+    cx.update(|cx| assert!(f.view.read(cx).palette.is_some()));
+    type_text(cx, &f, "logout");
+    press(cx, &f, &["enter"]);
+    cx.update(|cx| {
+        let view = f.view.read(cx);
+        assert!(view.palette.is_none());
+        assert_eq!(
+            view.open_card.as_ref().map(|k| k.rel_path.as_str()),
+            Some("backend/logout.md")
+        );
+    });
+
+    // With that card open, the palette can move it. Down skips "Create card".
+    press(cx, &f, &[&mod_key("k")]);
+    type_text(cx, &f, "move open card to done");
+    press(cx, &f, &["down", "enter"]);
+    settle(cx, &f);
+    assert_eq!(column(cx, &f, Status::Done), ["Fix logout"]);
+    assert!(read(&f, "backend/logout.md").contains("status: \"done\"\n"));
+
+    // Close the card. A query that matches no card offers to create one.
+    press(cx, &f, &["escape"]);
+    press(cx, &f, &[&mod_key("k")]);
+    type_text(cx, &f, "Brand new p1 #ops");
+    press(cx, &f, &["enter"]);
+    settle(cx, &f);
+    let name = format!("brand-new-{}.md", mdk::app::today());
+    let text = read(&f, &name);
+    assert!(
+        text.contains("priority: \"critical\"\n") && text.contains("labels: [\"ops\"]\n"),
+        "{text}"
+    );
+    cx.update(|cx| {
+        assert_eq!(
+            f.view
+                .read(cx)
+                .open_card
+                .as_ref()
+                .map(|k| k.rel_path.clone()),
+            Some(name.clone())
+        )
+    });
+}
+
+#[gpui_kit::test]
+fn palette_keys_and_the_settings_shortcut(cx: &mut TestAppContext) {
+    let f = open(cx, false, connected);
+    press(cx, &f, &[&mod_key("k"), "down", "down", "up"]);
+    cx.update(|cx| assert_eq!(f.view.read(cx).palette.as_ref().unwrap().selected, 1));
+    press(cx, &f, &["up", "up", "up"]);
+    cx.update(|cx| {
+        assert_eq!(
+            f.view.read(cx).palette.as_ref().unwrap().selected,
+            0,
+            "it stops at the top"
+        )
+    });
+    press(cx, &f, &["escape"]);
+    cx.update(|cx| assert!(f.view.read(cx).palette.is_none()));
+    // The same shortcut closes it again.
+    press(cx, &f, &[&mod_key("k"), &mod_key("k")]);
+    cx.update(|cx| assert!(f.view.read(cx).palette.is_none()));
+
+    press(cx, &f, &[&mod_key(",")]);
+    settle(cx, &f);
+    cx.update(|cx| assert!(f.view.read(cx).settings_open));
+    press(cx, &f, &["escape"]);
+    cx.update(|cx| assert!(!f.view.read(cx).settings_open));
+
+    // App commands run from the palette: "list" switches the view.
+    press(cx, &f, &[&mod_key("k")]);
+    type_text(cx, &f, "list view");
+    press(cx, &f, &["down", "enter"]);
+    cx.update(|cx| assert_eq!(f.view.read(cx).prefs.view, ViewChoice::List));
+}

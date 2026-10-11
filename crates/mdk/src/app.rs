@@ -1,14 +1,16 @@
 //! The root view. It owns the board and the preferences, and wires both to the window:
 //! background scans, the file watcher, saving the config, and the single-instance signal.
 
-use crate::board::{Board, CardKey, NewCard, ProjectId};
-use crate::prefs::{Prefs, SavedProject, ThemeChoice, WindowState};
+use crate::board::{Board, CardKey, Command, Filters, NewCard, PaletteItem, ProjectId};
+use crate::prefs::{Prefs, SavedProject, SavedView, ThemeChoice, ViewChoice, WindowState};
 use crate::theme;
 use crate::views::{CardEditor, NewCardForm};
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui_kit::base::AutoScroll;
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::menu::AppMenuBar;
+use gpui_kit::component::{ActiveTheme, GlobalState};
 use gpui_kit::*;
 use mdk_format::{Date, Status};
 use mdk_store::{Store, StoreError, StoreEvent, Watcher};
@@ -29,7 +31,16 @@ actions!(
         FocusUp,
         FocusDown,
         FocusLeft,
-        FocusRight
+        FocusRight,
+        TogglePalette,
+        OpenSettings,
+        ConnectFolder,
+        RescanAll,
+        ToggleTheme,
+        ToggleVim,
+        ShowBoard,
+        ShowList,
+        ArchiveDone
     ]
 );
 
@@ -42,6 +53,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("escape", CloseTop, Some("Mdk")),
         KeyBinding::new("secondary-z", Undo, Some("Mdk")),
         KeyBinding::new("secondary-shift-z", Redo, Some("Mdk")),
+        KeyBinding::new("secondary-k", TogglePalette, Some("Mdk")),
+        KeyBinding::new("secondary-,", OpenSettings, Some("Mdk")),
         KeyBinding::new("n", NewCardKey, Some("Board")),
         KeyBinding::new("space", PickUp, Some("Board")),
         KeyBinding::new("enter", OpenFocused, Some("Board")),
@@ -51,6 +64,56 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", FocusRight, Some("Board")),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+
+    // The native menu on macOS. On Windows and Linux the same menus show in the window.
+    let menu = |name: &'static str, items: Vec<MenuItem>| Menu {
+        name: name.into(),
+        items,
+        disabled: false,
+    };
+    let build = || {
+        vec![
+            menu(
+                "mdk",
+                vec![
+                    MenuItem::action("Settings...", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit mdk", Quit),
+                ],
+            ),
+            menu(
+                "File",
+                vec![
+                    MenuItem::action("New Card", NewCardKey),
+                    MenuItem::action("Connect Folder...", ConnectFolder),
+                    MenuItem::separator(),
+                    MenuItem::action("Rescan All", RescanAll),
+                    MenuItem::action("Archive Done Cards", ArchiveDone),
+                ],
+            ),
+            menu(
+                "Edit",
+                vec![
+                    MenuItem::action("Undo", Undo),
+                    MenuItem::action("Redo", Redo),
+                ],
+            ),
+            menu(
+                "View",
+                vec![
+                    MenuItem::action("Command Palette", TogglePalette),
+                    MenuItem::separator(),
+                    MenuItem::action("Board", ShowBoard),
+                    MenuItem::action("List", ShowList),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle Theme", ToggleTheme),
+                    MenuItem::action("Toggle Vim Keys", ToggleVim),
+                ],
+            ),
+        ]
+    };
+    GlobalState::global_mut(cx).set_app_menus(build().into_iter().map(Menu::owned).collect());
+    cx.set_menus(build());
 }
 
 /// Today in the user's time zone.
@@ -145,6 +208,30 @@ pub struct DragCard {
     pub title: SharedString,
 }
 
+/// The command palette: its search box and which row is selected.
+pub struct Palette {
+    pub input: Entity<InputState>,
+    pub selected: usize,
+    _subscription: Subscription,
+}
+
+/// A dropdown of the filter bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterMenu {
+    Labels,
+    Due,
+}
+
+/// The list view's columns, which are also its sort keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListColumn {
+    Title,
+    Status,
+    Priority,
+    Due,
+    Assignee,
+}
+
 pub struct Mdk {
     pub board: Board,
     pub prefs: Prefs,
@@ -183,6 +270,20 @@ pub struct Mdk {
     board_auto_scroll: AutoScroll,
     scroll_column: usize,
     pub(crate) board_scroll: ScrollHandle,
+    /// The filter bar's two text boxes.
+    pub search: Entity<InputState>,
+    pub assignee_filter: Entity<InputState>,
+    pub(crate) filter_menu: Option<FilterMenu>,
+    /// The "save view" name box, while a name is being typed.
+    pub view_name: Option<Entity<InputState>>,
+    pub palette: Option<Palette>,
+    pub settings_open: bool,
+    /// The list view's rows, and how they are sorted: a column, and whether descending.
+    pub list_rows: Vec<CardKey>,
+    pub list_sort: Option<(ListColumn, bool)>,
+    /// The menu bar drawn in the window on Windows and Linux.
+    pub(crate) menu_bar: Option<Entity<AppMenuBar>>,
+    _filter_subscriptions: Vec<Subscription>,
     save_task: Option<Task<()>>,
     /// Focus for the board area, which owns the plain-key shortcuts.
     pub(crate) focus: FocusHandle,
@@ -257,6 +358,27 @@ impl Mdk {
         })
         .detach();
 
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search title, body, id, assignee, label...")
+        });
+        let assignee_filter = cx.new(|cx| InputState::new(window, cx).placeholder("assignee"));
+        let on_filter_typed = |this: &mut Mdk,
+                               _: &Entity<InputState>,
+                               event: &InputEvent,
+                               _: &mut Window,
+                               cx: &mut Context<Mdk>| {
+            if matches!(event, InputEvent::Change) {
+                this.board.filters.query = this.search.read(cx).value().to_string();
+                this.board.filters.assignee = this.assignee_filter.read(cx).value().to_string();
+                this.changed(cx);
+            }
+        };
+        let filter_subscriptions = vec![
+            cx.subscribe_in(&search, window, on_filter_typed),
+            cx.subscribe_in(&assignee_filter, window, on_filter_typed),
+        ];
+        board.today = Some(today());
+
         let mut this = Mdk {
             board,
             prefs,
@@ -287,6 +409,16 @@ impl Mdk {
             board_auto_scroll: AutoScroll::default(),
             scroll_column: 0,
             board_scroll: ScrollHandle::new(),
+            search,
+            assignee_filter,
+            filter_menu: None,
+            view_name: None,
+            palette: None,
+            settings_open: false,
+            list_rows: Vec::new(),
+            list_sort: None,
+            menu_bar: (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx)),
+            _filter_subscriptions: filter_subscriptions,
             save_task: None,
             focus: cx.focus_handle(),
         };
@@ -400,6 +532,8 @@ impl Mdk {
 
     /// Tell each column's list which rows changed, so it keeps its scroll position.
     fn sync_lists(&mut self) {
+        self.board.today = Some(today());
+        self.list_rows = self.sorted_list_rows();
         for (i, status) in Status::ALL.into_iter().enumerate() {
             let new: Vec<(CardKey, u64)> = self
                 .board
@@ -780,6 +914,22 @@ impl Mdk {
     /// An arrow key. With a card picked up it moves the card, otherwise it moves the focus.
     /// `dx` and `dy` are -1, 0 or 1.
     pub(crate) fn arrow(&mut self, dx: isize, dy: isize, cx: &mut Context<Self>) {
+        if self.prefs.view == ViewChoice::List {
+            // The list has one column: Up and Down walk its rows.
+            let row = self
+                .focused
+                .as_ref()
+                .and_then(|key| self.list_rows.iter().position(|k| k == key));
+            let next = match row {
+                Some(row) => row
+                    .saturating_add_signed(dy)
+                    .min(self.list_rows.len().saturating_sub(1)),
+                None => 0,
+            };
+            self.focused = self.list_rows.get(next).cloned();
+            cx.notify();
+            return;
+        }
         let place = self.focused.as_ref().and_then(|key| self.place_of(key));
         let Some((column, row)) = place else {
             // Nothing focused yet: start at the top of the first column that has cards.
@@ -903,11 +1053,12 @@ impl Mdk {
     pub(crate) fn close_top(&mut self, _: &CloseTop, window: &mut Window, cx: &mut Context<Self>) {
         if self.confirm.is_some() {
             self.answer_confirm(false, window, cx);
+        } else if self.close_popup() {
+            // One of the small overlays was open, and is now closed.
         } else if self.new_card.is_some() {
             self.close_new_card(window, cx);
         } else if self.grabbed.is_some() {
             self.cancel_grab(cx);
-        } else if self.menu_for.take().is_some() {
         } else if self.editor.is_some() {
             self.close_editor(window, cx);
         } else {
@@ -915,5 +1066,272 @@ impl Mdk {
         }
         self.focus.focus(window, cx);
         cx.notify();
+    }
+
+    /// Close the palette, the settings dialog, the view-name box or an open menu,
+    /// whichever is on top. False when none was open.
+    fn close_popup(&mut self) -> bool {
+        self.palette.take().is_some()
+            || std::mem::take(&mut self.settings_open)
+            || self.view_name.take().is_some()
+            || self.filter_menu.take().is_some()
+            || self.menu_for.take().is_some()
+    }
+
+    // ---- filters and saved views ------------------------------------------------------------
+
+    /// Replace the filters, and show them in the filter bar's text boxes.
+    pub fn set_filters(&mut self, filters: Filters, window: &mut Window, cx: &mut Context<Self>) {
+        let (query, assignee) = (filters.query.clone(), filters.assignee.clone());
+        self.board.filters = filters;
+        self.search
+            .update(cx, |state, cx| state.set_value(query, window, cx));
+        self.assignee_filter
+            .update(cx, |state, cx| state.set_value(assignee, window, cx));
+        self.filter_menu = None;
+        self.changed(cx);
+    }
+
+    pub fn toggle_priority_filter(
+        &mut self,
+        priority: mdk_format::Priority,
+        cx: &mut Context<Self>,
+    ) {
+        let priorities = &mut self.board.filters.priorities;
+        match priorities.iter().position(|p| *p == priority) {
+            Some(i) => drop(priorities.remove(i)),
+            None => priorities.push(priority),
+        }
+        self.changed(cx);
+    }
+
+    /// Saved views belong to the selected project, or to "All projects".
+    fn views_key(&self) -> String {
+        self.board
+            .selected_project
+            .clone()
+            .unwrap_or_else(|| "all".into())
+    }
+
+    pub fn saved_views(&self) -> &[SavedView] {
+        self.prefs
+            .saved_views
+            .get(&self.views_key())
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Save the current filters under a name. The same name again replaces that view.
+    pub fn save_view(&mut self, name: &str, cx: &mut Context<Self>) {
+        self.view_name = None;
+        let view = SavedView::new(name, &self.board.filters);
+        if view.name.is_empty() {
+            cx.notify();
+            return;
+        }
+        let views = self.prefs.saved_views.entry(self.views_key()).or_default();
+        views.retain(|v| v.name != view.name);
+        views.push(view);
+        self.prefs_changed(cx);
+    }
+
+    pub fn apply_view(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(filters) = self.saved_views().get(index).map(SavedView::filters) {
+            self.set_filters(filters, window, cx);
+        }
+    }
+
+    pub fn delete_view(&mut self, index: usize, cx: &mut Context<Self>) {
+        let key = self.views_key();
+        if let Some(views) = self.prefs.saved_views.get_mut(&key)
+            && index < views.len()
+        {
+            views.remove(index);
+            if views.is_empty() {
+                self.prefs.saved_views.remove(&key);
+            }
+        }
+        self.prefs_changed(cx);
+    }
+
+    /// Show the box that asks for a saved view's name.
+    pub(crate) fn ask_view_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("view name"));
+        cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                let name = input.read(cx).value().to_string();
+                this.save_view(&name, cx);
+            }
+        })
+        .detach();
+        input.update(cx, |state, cx| state.focus(window, cx));
+        self.view_name = Some(input);
+        cx.notify();
+    }
+
+    // ---- board or list ----------------------------------------------------------------------
+
+    pub fn set_view(&mut self, view: ViewChoice, cx: &mut Context<Self>) {
+        self.prefs.view = view;
+        self.prefs_changed(cx);
+    }
+
+    /// Click a list header: sort by it, then the other way, then back to board order.
+    pub fn sort_list_by(&mut self, column: ListColumn, cx: &mut Context<Self>) {
+        self.list_sort = match self.list_sort {
+            Some((current, false)) if current == column => Some((column, true)),
+            Some((current, true)) if current == column => None,
+            _ => Some((column, false)),
+        };
+        self.changed(cx);
+    }
+
+    fn sorted_list_rows(&self) -> Vec<CardKey> {
+        let mut cards = self.board.visible_cards();
+        if let Some((column, descending)) = self.list_sort {
+            cards.sort_by(|a, b| {
+                let (a, b) = (&a.data, &b.data);
+                let order = match column {
+                    ListColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                    ListColumn::Status => a.status.cmp(&b.status),
+                    ListColumn::Priority => a.priority.cmp(&b.priority),
+                    // Cards with no due date go last.
+                    ListColumn::Due => (a.due_date.is_none(), &a.due_date)
+                        .cmp(&(b.due_date.is_none(), &b.due_date)),
+                    ListColumn::Assignee => {
+                        a.assignee.to_lowercase().cmp(&b.assignee.to_lowercase())
+                    }
+                };
+                if descending { order.reverse() } else { order }
+            });
+        }
+        cards.into_iter().map(|card| card.key.clone()).collect()
+    }
+
+    // ---- palette, commands and settings -----------------------------------------------------
+
+    pub fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.take().is_some() {
+            self.focus.focus(window, cx);
+            cx.notify();
+            return;
+        }
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search cards, or type to create...")
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    if let Some(palette) = &mut this.palette {
+                        palette.selected = 0;
+                    }
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } => this.run_palette_selection(window, cx),
+                _ => {}
+            },
+        );
+        input.update(cx, |state, cx| state.focus(window, cx));
+        self.palette = Some(Palette {
+            input,
+            selected: 0,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    pub fn palette_items(&self, cx: &App) -> Vec<PaletteItem> {
+        let query = self
+            .palette
+            .as_ref()
+            .map_or(String::new(), |p| p.input.read(cx).value().to_string());
+        self.board.palette_items(&query, self.open_card.as_ref())
+    }
+
+    /// Move the palette's selection up or down, stopping at the ends.
+    pub(crate) fn palette_step(&mut self, down: bool, cx: &mut Context<Self>) {
+        let count = self.palette_items(cx).len();
+        if let Some(palette) = &mut self.palette {
+            palette.selected = match down {
+                true => (palette.selected + 1).min(count.saturating_sub(1)),
+                false => palette.selected.saturating_sub(1),
+            };
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn run_palette_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.palette.as_ref().map_or(0, |p| p.selected);
+        if let Some(item) = self.palette_items(cx).into_iter().nth(selected) {
+            self.run_palette_item(item, window, cx);
+        }
+    }
+
+    pub fn run_palette_item(
+        &mut self,
+        item: PaletteItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.palette = None;
+        self.focus.focus(window, cx);
+        match item {
+            PaletteItem::Card(key) => self.open(key, window, cx),
+            PaletteItem::Create(text) => {
+                // The same quick-add words as the New card dialog's title.
+                let quick = mdk_format::parse_quick_add(&text, today());
+                let card = NewCard {
+                    title: if quick.title.is_empty() {
+                        text.clone()
+                    } else {
+                        quick.title
+                    },
+                    priority: quick.priority,
+                    assignee: quick.assignee.unwrap_or_default(),
+                    due_date: quick.due_date,
+                    labels: quick.labels,
+                    ..Default::default()
+                };
+                if let Some(key) = self.create_card(card, None, cx) {
+                    self.open(key, window, cx);
+                }
+            }
+            PaletteItem::Move(status) => {
+                if let Some(key) = self.open_card.clone() {
+                    self.flush_editor(window, cx);
+                    self.move_card(&key, status, None, cx);
+                }
+            }
+            PaletteItem::Command(command) => self.run_command(command, window, cx),
+        }
+        cx.notify();
+    }
+
+    pub fn run_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::ConnectFolder => self.connect_folder(cx),
+            Command::RescanAll => self.rescan_all(cx),
+            Command::ToggleTheme => self.toggle_theme(window, cx),
+            Command::ToggleVim => self.set_vim_keys(!self.prefs.vim_keys, cx),
+            Command::BoardView => self.set_view(ViewChoice::Board, cx),
+            Command::ListView => self.set_view(ViewChoice::List, cx),
+            Command::ArchiveDone => self.ask_archive(cx),
+            Command::Settings => {
+                self.settings_open = true;
+                cx.notify();
+            }
+        }
+    }
+
+    pub fn set_theme(&mut self, choice: ThemeChoice, window: &mut Window, cx: &mut Context<Self>) {
+        self.prefs.theme = choice;
+        theme::apply(choice, window, cx);
+        self.prefs_changed(cx);
+    }
+
+    pub(crate) fn open_config_folder(&self, cx: &mut Context<Self>) {
+        let _ = std::fs::create_dir_all(&self.config_dir);
+        cx.reveal_path(&self.config_dir);
     }
 }
