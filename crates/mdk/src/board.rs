@@ -3,7 +3,7 @@
 //! No GPUI in here. The root view owns one `Board`, and every change to a card file
 //! goes through a `Board` method, so there is a single writer (build spec, principle 2).
 
-use mdk_format::{ParsedCard, Status};
+use mdk_format::{CardPatch, Date, LineEnding, ParsedCard, Priority, Status};
 use mdk_store::{ScannedFile, Store, StoreError, StoreEvent, content_hash};
 use std::collections::{BTreeSet, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -149,7 +149,44 @@ pub struct Board {
     pub selected_project: Option<ProjectId>,
     /// `None` is "all" work folders.
     pub selected_workspace: Option<String>,
+    undo: Vec<UndoEntry>,
+    redo: Vec<UndoEntry>,
 }
+
+/// One change to one file, recorded so it can be undone. `None` means the file is absent.
+#[derive(Clone, Debug, PartialEq)]
+enum FileOp {
+    Change {
+        key: CardKey,
+        before: Option<String>,
+        after: Option<String>,
+    },
+    Rename {
+        from: CardKey,
+        to: CardKey,
+    },
+}
+
+/// A board action and the file changes it made.
+#[derive(Clone, Debug)]
+struct UndoEntry {
+    label: String,
+    ops: Vec<FileOp>,
+}
+
+/// What the New card dialog collects.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NewCard {
+    pub title: String,
+    pub body: String,
+    pub status: Option<Status>,
+    pub priority: Option<Priority>,
+    pub assignee: String,
+    pub due_date: Option<String>,
+    pub labels: Vec<String>,
+}
+
+const BROKEN: &str = "Fix the frontmatter first";
 
 impl Board {
     // ---- projects ---------------------------------------------------------------------------
@@ -291,6 +328,389 @@ impl Board {
     fn put_card(&mut self, project: &str, rel_path: &str, content: Result<String, String>) {
         let card = Card::new(project, rel_path, content);
         self.cards.insert(card.key.clone(), card);
+    }
+
+    // ---- writing cards ----------------------------------------------------------------------
+    //
+    // Every change to a card file is made here. Each one re-reads the file, changes only
+    // what the action names, writes atomically, and records how to undo itself.
+
+    fn store_for(&mut self, key: &CardKey) -> Result<Store, String> {
+        self.store(&key.project)
+            .ok_or_else(|| "The project folder is not available".to_string())
+    }
+
+    /// Bring one card in memory in line with its file.
+    fn reload(&mut self, key: &CardKey, text: Option<&str>) {
+        match text {
+            Some(text) => self.put_card(&key.project, &key.rel_path, Ok(text.to_string())),
+            None => drop(self.cards.remove(key)),
+        }
+    }
+
+    fn record(&mut self, label: impl Into<String>, ops: Vec<FileOp>) {
+        if !ops.is_empty() {
+            self.undo.push(UndoEntry {
+                label: label.into(),
+                ops,
+            });
+            self.redo.clear();
+        }
+    }
+
+    /// Patch one card file on top of what is on disk right now.
+    fn patch(&mut self, key: &CardKey, patch: &CardPatch) -> Result<FileOp, String> {
+        if self.card(key).is_some_and(|c| c.error().is_some()) {
+            return Err(BROKEN.to_string());
+        }
+        let store = self.store_for(key)?;
+        let file_name = key.rel_path.rsplit('/').next().unwrap_or(&key.rel_path);
+        let now = mdk_format::now_iso();
+        let (before, after) = store
+            .update(&key.rel_path, |raw| {
+                mdk_format::apply_patch(raw, file_name, patch, &now).map_err(|e| e.to_string())
+            })
+            .map_err(|e| e.to_string())?;
+        self.reload(key, Some(&after));
+        Ok(FileOp::Change {
+            key: key.clone(),
+            before: Some(before),
+            after: Some(after),
+        })
+    }
+
+    /// Change a card's fields. Only the fields the patch names are written.
+    pub fn update_card(&mut self, key: &CardKey, patch: &CardPatch) -> Result<(), String> {
+        let op = self.patch(key, patch)?;
+        let title = self
+            .card(key)
+            .map_or_else(String::new, |c| c.data.title.clone());
+        self.record(format!("Edit {title}"), vec![op]);
+        Ok(())
+    }
+
+    /// Move a card to a column, at `index` among the cards that column shows, or at the end.
+    /// Writes only `status`, `order` and `modified`. Returns false when nothing had to move.
+    pub fn move_card(
+        &mut self,
+        key: &CardKey,
+        status: Status,
+        index: Option<usize>,
+    ) -> Result<bool, String> {
+        let card = self.card(key).ok_or("That card is gone")?;
+        if card.error().is_some() {
+            return Err(BROKEN.to_string());
+        }
+        let (from_status, from_order) = (card.data.status, card.data.order);
+        // The neighbours are the cards the user sees in that column, without the moving card.
+        let column: Vec<(CardKey, f64)> = self
+            .column(status)
+            .into_iter()
+            .filter(|c| c.key != *key)
+            .map(|c| (c.key.clone(), c.data.order))
+            .collect();
+
+        let mut ops = Vec::new();
+        let order = match index.filter(|&i| i < column.len()) {
+            None => {
+                // Already the last card of that column: nothing to do.
+                if self
+                    .column(status)
+                    .last()
+                    .is_some_and(|last| last.key == *key)
+                {
+                    return Ok(false);
+                }
+                match column.iter().map(|(_, order)| *order).reduce(f64::max) {
+                    Some(max) => max.max(0.0) + 1.0,
+                    None => 0.0,
+                }
+            }
+            Some(i) => {
+                let order = if i == 0 {
+                    column[0].1 - 1.0
+                } else {
+                    (column[i - 1].1 + column[i].1) / 2.0
+                };
+                let collides = !order.is_finite()
+                    || column[i].1 == order
+                    || (i > 0 && column[i - 1].1 == order);
+                if collides {
+                    // No room between the neighbours. Renumber the column 0, 10, 20 and so on.
+                    for (n, (neighbour, old)) in column.iter().enumerate() {
+                        let new = (n * 10) as f64;
+                        if *old != new {
+                            let patch = CardPatch {
+                                order: Some(new),
+                                ..Default::default()
+                            };
+                            ops.push(self.patch(neighbour, &patch)?);
+                        }
+                    }
+                    (i * 10) as f64 - 5.0
+                } else {
+                    order
+                }
+            }
+        };
+        if from_status == status && from_order == order && ops.is_empty() {
+            return Ok(false);
+        }
+        let patch = CardPatch {
+            status: Some(status),
+            order: Some(order),
+            ..Default::default()
+        };
+        ops.push(self.patch(key, &patch)?);
+        self.record(format!("Move to {}", status.name()), ops);
+        Ok(true)
+    }
+
+    /// Create a card file in the selected project, or the first one. `workspace` overrides
+    /// the selected work folder. `today` dates the file name.
+    pub fn create_card(
+        &mut self,
+        input: NewCard,
+        workspace: Option<&str>,
+        today: Date,
+    ) -> Result<CardKey, String> {
+        let title = input.title.trim();
+        if title.is_empty() {
+            return Err("A card needs a title".to_string());
+        }
+        let project = self
+            .selected_project
+            .clone()
+            .or_else(|| self.projects.first().map(|p| p.id.clone()))
+            .ok_or("Connect a folder first")?;
+        let folder = match workspace {
+            Some(folder) => folder.trim().trim_matches('/').to_string(),
+            None => self.selected_workspace.clone().unwrap_or_default(),
+        };
+        let store = self
+            .store(&project)
+            .ok_or("The project folder is not available")?;
+        let rel_path = store
+            .free_name(&folder, &mdk_format::new_file_name(title, today))
+            .map_err(|e| e.to_string())?;
+        let file_name = rel_path.rsplit('/').next().unwrap_or(&rel_path);
+        let now = mdk_format::now_iso();
+        let body = input.body.trim();
+        let card = ParsedCard {
+            // The file name is unique in its folder, so the id is too.
+            id: file_name.trim_end_matches(".md").to_string(),
+            title: title.to_string(),
+            body: if body.is_empty() {
+                format!("# {title}")
+            } else {
+                body.to_string()
+            },
+            status: input.status.unwrap_or(Status::Backlog),
+            priority: input.priority.unwrap_or(Priority::Medium),
+            assignee: input.assignee.trim().to_string(),
+            due_date: input.due_date.filter(|d| !d.is_empty()),
+            created: now.clone(),
+            modified: now.clone(),
+            labels: input.labels,
+            // New cards go last: the time in milliseconds, as Electron does.
+            order: chrono::Utc::now().timestamp_millis() as f64,
+            extra: Vec::new(),
+            line_ending: LineEnding::Lf,
+            parse_error: None,
+        };
+        let text = mdk_format::write(&card, &now);
+        store.write(&rel_path, &text).map_err(|e| e.to_string())?;
+        let key = CardKey { project, rel_path };
+        self.reload(&key, Some(&text));
+        self.record(
+            format!("Create {title}"),
+            vec![FileOp::Change {
+                key: key.clone(),
+                before: None,
+                after: Some(text),
+            }],
+        );
+        Ok(key)
+    }
+
+    /// Delete a card file. Its exact text is kept, so the delete can be undone.
+    pub fn delete_card(&mut self, key: &CardKey) -> Result<(), String> {
+        let title = self
+            .card(key)
+            .map_or_else(String::new, |c| c.data.title.clone());
+        let text = self
+            .store_for(key)?
+            .delete(&key.rel_path)
+            .map_err(|e| e.to_string())?;
+        self.reload(key, None);
+        self.record(
+            format!("Delete {title}"),
+            vec![FileOp::Change {
+                key: key.clone(),
+                before: Some(text),
+                after: None,
+            }],
+        );
+        Ok(())
+    }
+
+    /// The done cards on show that are not archived yet.
+    pub fn archivable(&self) -> Vec<CardKey> {
+        self.column(Status::Done)
+            .into_iter()
+            .filter(|c| c.workspace != "archive")
+            .map(|c| c.key.clone())
+            .collect()
+    }
+
+    /// Move every done card on show into its project's `archive/` folder. The file content
+    /// does not change, only its path. Returns how many moved.
+    pub fn archive_done(&mut self) -> Result<usize, String> {
+        let mut ops = Vec::new();
+        let mut failure = None;
+        for from in self.archivable() {
+            let moved = (|| {
+                let store = self.store_for(&from)?;
+                let file_name = from.rel_path.rsplit('/').next().unwrap_or(&from.rel_path);
+                let rel_path = store
+                    .free_name("archive", file_name)
+                    .map_err(|e| e.to_string())?;
+                store
+                    .rename(&from.rel_path, &rel_path)
+                    .map_err(|e| e.to_string())?;
+                let text = store.read(&rel_path).map_err(|e| e.to_string())?;
+                Ok::<_, String>((
+                    CardKey {
+                        project: from.project.clone(),
+                        rel_path,
+                    },
+                    text,
+                ))
+            })();
+            match moved {
+                Ok((to, text)) => {
+                    self.reload(&from, None);
+                    self.reload(&to, Some(&text));
+                    ops.push(FileOp::Rename { from, to });
+                }
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+        let count = ops.len();
+        self.record(format!("Archive {count} cards"), ops);
+        match failure {
+            Some(error) if count == 0 => Err(error),
+            _ => Ok(count),
+        }
+    }
+
+    /// Flip the nth checkbox in a card's body.
+    pub fn toggle_subtask(&mut self, key: &CardKey, index: usize) -> Result<(), String> {
+        let body = &self.card(key).ok_or("That card is gone")?.data.body;
+        let patch = CardPatch {
+            body: Some(mdk_format::toggle_subtask(body, index)),
+            ..Default::default()
+        };
+        self.update_card(key, &patch)
+    }
+
+    // ---- undo and redo ----------------------------------------------------------------------
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Undo the last board action. Returns its label. Refused, and left on the stack, when
+    /// a file it touched has changed on disk since.
+    pub fn undo(&mut self) -> Result<Option<String>, String> {
+        let Some(entry) = self.undo.pop() else {
+            return Ok(None);
+        };
+        match self.replay(&entry, true) {
+            Ok(()) => {
+                let label = entry.label.clone();
+                self.redo.push(entry);
+                Ok(Some(label))
+            }
+            Err(error) => {
+                self.undo.push(entry);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn redo(&mut self) -> Result<Option<String>, String> {
+        let Some(entry) = self.redo.pop() else {
+            return Ok(None);
+        };
+        match self.replay(&entry, false) {
+            Ok(()) => {
+                let label = entry.label.clone();
+                self.undo.push(entry);
+                Ok(Some(label))
+            }
+            Err(error) => {
+                self.redo.push(entry);
+                Err(error)
+            }
+        }
+    }
+
+    /// Run an entry's file changes backwards (undo) or forwards (redo). Every file is checked
+    /// first, so the entry is applied whole or not at all.
+    fn replay(&mut self, entry: &UndoEntry, backwards: bool) -> Result<(), String> {
+        const CHANGED: &str = "Changed on disk since, can't undo";
+        // (key, the text the file must have now, the text it gets), or a rename.
+        let mut steps = Vec::new();
+        for op in &entry.ops {
+            steps.push(match (op, backwards) {
+                (FileOp::Change { key, before, after }, true) => {
+                    (key.clone(), after.clone(), before.clone(), None)
+                }
+                (FileOp::Change { key, before, after }, false) => {
+                    (key.clone(), before.clone(), after.clone(), None)
+                }
+                (FileOp::Rename { from, to }, true) => (to.clone(), None, None, Some(from.clone())),
+                (FileOp::Rename { from, to }, false) => {
+                    (from.clone(), None, None, Some(to.clone()))
+                }
+            });
+        }
+        if backwards {
+            steps.reverse();
+        }
+        for (key, expected, _, rename_to) in &steps {
+            let store = self.store_for(key)?;
+            let current = store.read(&key.rel_path).ok();
+            let ok = match rename_to {
+                Some(to) => current.is_some() && store.read(&to.rel_path).is_err(),
+                None => current == *expected,
+            };
+            if !ok {
+                return Err(CHANGED.to_string());
+            }
+        }
+        for (key, _, target, rename_to) in steps {
+            let store = self.store_for(&key)?;
+            let done = match (&rename_to, &target) {
+                (Some(to), _) => store.rename(&key.rel_path, &to.rel_path),
+                (None, Some(text)) => store.write(&key.rel_path, text),
+                (None, None) => store.delete(&key.rel_path).map(drop),
+            };
+            done.map_err(|e| e.to_string())?;
+            match rename_to {
+                Some(to) => {
+                    let text = store.read(&to.rel_path).ok();
+                    self.reload(&key, None);
+                    self.reload(&to, text.as_deref());
+                }
+                None => self.reload(&key, target.as_deref()),
+            }
+        }
+        Ok(())
     }
 
     // ---- selection --------------------------------------------------------------------------
