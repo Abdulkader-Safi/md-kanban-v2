@@ -260,3 +260,18 @@ fn subtask_list_and_toggle() {
     );
     assert_eq!(toggle_subtask(body, 9), body);
 }
+
+#[test]
+fn excerpts() {
+    assert_eq!(
+        excerpt("# Title\n\nFirst %% private %% line.\nSecond."),
+        "First  line.\nSecond."
+    );
+    assert_eq!(excerpt("# Only a title"), "");
+    assert_eq!(
+        excerpt(&format!("# T\n{}", "é".repeat(200)))
+            .chars()
+            .count(),
+        140
+    );
+}

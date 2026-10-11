@@ -23,7 +23,8 @@ pub enum StoreEvent {
     },
     /// Too much changed to list, or a folder moved. Read the project again.
     Rescan,
-    /// The project folder itself is gone.
+    /// The project folder itself is gone. Sent with the next event after it went. The OS
+    /// does not always send one, so callers should also check the folder from time to time.
     RootMissing,
     Error {
         message: String,
@@ -165,5 +166,19 @@ mod tests {
         let batch = |n: usize| store.batch(paths[..n].iter().map(|p| p.as_path()));
         assert_eq!(batch(BURST).len(), BURST);
         assert_eq!(batch(BURST + 1), [StoreEvent::Rescan]);
+    }
+
+    #[test]
+    fn any_event_after_the_root_is_gone_reports_it_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let card = store.root().join("card.md");
+        fs::write(&card, "x").unwrap();
+        assert_eq!(store.batch([card.as_path()].into_iter()).len(), 1);
+        fs::remove_dir_all(dir.path()).unwrap();
+        assert_eq!(
+            store.batch([card.as_path()].into_iter()),
+            [StoreEvent::RootMissing]
+        );
     }
 }

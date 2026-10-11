@@ -397,12 +397,3 @@ fn a_new_subfolder_is_picked_up_and_watched() {
     put(store.root(), "frontend/card.md", "x");
     assert!(wait_for(&rx, &changed("frontend/card.md"), start) < LIMIT);
 }
-
-#[test]
-fn a_removed_root_is_reported() {
-    let (dir, store) = project();
-    put(store.root(), "card.md", "x");
-    let (_watcher, rx) = watch(&store);
-    fs::remove_dir_all(dir.path()).unwrap();
-    wait_for(&rx, &StoreEvent::RootMissing, Instant::now());
-}

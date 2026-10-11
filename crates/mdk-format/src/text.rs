@@ -278,6 +278,19 @@ pub fn strip_comments(md: &str) -> String {
     out.join("\n")
 }
 
+/// The card-face excerpt: the body without `%% comments %%` and without its title heading,
+/// cut to 140 characters.
+pub fn excerpt(body: &str) -> String {
+    static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^#\s+.+$").unwrap());
+    let visible = strip_comments(body);
+    TITLE
+        .replace(&visible, "")
+        .trim()
+        .chars()
+        .take(140)
+        .collect()
+}
+
 // ---- subtasks -------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
