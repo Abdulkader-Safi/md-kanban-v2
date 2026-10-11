@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["spikes/*"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+# Exact pins. Upgrade gpui-kit only on purpose, in its own commit (build spec, principle 7).
+[workspace.dependencies]
+gpui-kit = "=0.7.1"
+notify = "=8.2.0"
+notify-debouncer-full = "=0.7.0"
+
+[profile.release]
+lto = "thin"
+strip = true
