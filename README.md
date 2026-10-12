@@ -6,7 +6,7 @@ mdk is a Rust rebuild of [MD Kanban](https://github.com/Abdulkader-Safi/md-kanba
 
 ## Status
 
-Feature-complete against the build spec in `resources/06-build-spec.md`, and tested without a window on macOS, Windows and Linux in CI. Two things are still open: nobody has checked how it looks next to the Electron app yet, and no release has been published, so for now you build it from source. `PROGRESS.md` lists every open check.
+Feature-complete against the build spec in `resources/06-build-spec.md`, and tested without a window on macOS, Windows and Linux in CI. The main screens have been looked at in both themes. Still open: checking it by hand next to the Electron app, and publishing a release, so for now you build it from source. `PROGRESS.md` lists every open check.
 
 ## Run it
 
@@ -116,6 +116,7 @@ Everything mdk remembers is in one `config.json` in the OS config folder: `~/Lib
 - `MDK_CONFIG_DIR`: use another folder.
 - `MDK_LOG`: log level, `info` by default. `debug` says more.
 - `MDK_NO_WATCH=1`: turn the file watcher off.
+- `MDK_SHOW`: open screens at launch, for screenshots and manual checks. For example `MDK_SHOW="card=writing/preview-showcase-2026-10-11.md;preview"`. Words: `card=<path>`, `preview`, `markdown`, `list`, `board`, `palette`, `new`, `settings`, `light`, `dark`, `vim`, `project=<name>`.
 
 ## Build a release
 

@@ -77,6 +77,7 @@ impl Render for Mdk {
         let c = Colors::of(cx);
         let narrow = window.viewport_size().width < NARROW;
         let font = cx.theme().font_family.clone();
+        self.apply_show(window, cx);
         self.reconcile_editor(window, cx);
         // A drag that ended outside every column leaves its slot behind. Clear it.
         if !cx.has_active_drag() && (self.slot.is_some() || self.dragging.is_some()) {

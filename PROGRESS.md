@@ -33,6 +33,20 @@ Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 - Own-write suppression lives in the store, by content hash, as the spec says. The burst rule (more than 200 paths in one debounced batch becomes one `Rescan`) is checked on the batch function directly, because 250 real writes arrive as several batches.
 - The spikes stay in `spikes/` as reference until the milestones that replace them. They are workspace members but not default members.
 
+## First look, 12 October 2026
+
+The screen was unlocked, so the release build was run on the Electron repo's task folders and on the sample project, and its window captured. Seen: the board in both themes, the card editor's Markdown and Preview tabs, the New card dialog, the command palette, the list view and the settings dialog. The layout matches the Electron screenshot's structure: header, 240 px sidebar, filter bar, 288 px columns, card faces.
+
+Three defects showed up, none of which a headless test could see. All are fixed:
+
+- Long excerpts were cut off at the card's edge. They now end in an ellipsis.
+- In the editor, link text, wikilinks and callout types were dark navy on the dark background. The theme file had no syntax colours, so the editor kept gpui-kit's light ones. `mdk.json` now carries a `highlight` section per theme, with Electron's `--md-*` colours.
+- The list view's columns did not line up, because each row was only as wide as its content.
+
+`MDK_SHOW` opens screens at launch for checks like this: `MDK_SHOW="card=writing/x.md;preview" cargo run -p mdk`.
+
+Still not seen: the Done column and sideways scrolling, the lower half of the preview (code, maths, Mermaid) in the real app, the menus, and anything that needs a click.
+
 ## What is left
 
 Everything in the spec is built except single-instance on Windows and handling the reduce-motion setting. What is missing is checking. In order of how much it matters:

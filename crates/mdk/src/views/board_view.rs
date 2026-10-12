@@ -200,6 +200,7 @@ fn card_face(
                     .line_height(px(20.))
                     .text_color(c.muted_fg)
                     .line_clamp(2)
+                    .text_ellipsis()
                     .child(excerpt),
             )
         })

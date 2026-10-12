@@ -284,6 +284,8 @@ pub struct Mdk {
     /// The menu bar drawn in the window on Windows and Linux.
     pub(crate) menu_bar: Option<Entity<AppMenuBar>>,
     _filter_subscriptions: Vec<Subscription>,
+    /// `MDK_SHOW`: screens to open once the first scan is in. A developer aid.
+    show: Option<String>,
     save_task: Option<Task<()>>,
     /// Focus for the board area, which owns the plain-key shortcuts.
     pub(crate) focus: FocusHandle,
@@ -419,6 +421,7 @@ impl Mdk {
             list_sort: None,
             menu_bar: (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx)),
             _filter_subscriptions: filter_subscriptions,
+            show: std::env::var("MDK_SHOW").ok(),
             save_task: None,
             focus: cx.focus_handle(),
         };
@@ -1352,5 +1355,57 @@ impl Mdk {
     pub(crate) fn open_config_folder(&self, cx: &mut Context<Self>) {
         let _ = std::fs::create_dir_all(&self.config_dir);
         cx.reveal_path(&self.config_dir);
+    }
+
+    /// Open what `MDK_SHOW` asks for, once the cards are loaded. For screenshots and manual
+    /// checks: `MDK_SHOW="card=backend/x.md;preview"`. Words: `card=<path>`, `preview`,
+    /// `markdown`, `list`, `board`, `palette`, `new`, `settings`, `light`, `dark`, `vim`,
+    /// `project=<name>`.
+    pub(crate) fn apply_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.show.is_none() || self.board.projects.iter().any(|p| p.loading) {
+            return;
+        }
+        let show = self.show.take().unwrap_or_default();
+        for word in show.split(';').map(str::trim) {
+            match word.split_once('=') {
+                Some(("card", path)) => {
+                    let key = self
+                        .board
+                        .projects
+                        .iter()
+                        .map(|p| CardKey {
+                            project: p.id.clone(),
+                            rel_path: path.to_string(),
+                        })
+                        .find(|key| self.board.card(key).is_some());
+                    if let Some(key) = key {
+                        self.open(key, window, cx);
+                    }
+                }
+                Some(("project", name)) => {
+                    let id = self
+                        .board
+                        .projects
+                        .iter()
+                        .find(|p| p.name == name)
+                        .map(|p| p.id.clone());
+                    self.select_project(id, cx);
+                }
+                _ => match word {
+                    "preview" => self.prefs.editor_tab = crate::prefs::EditorTab::Preview,
+                    "markdown" => self.prefs.editor_tab = crate::prefs::EditorTab::Markdown,
+                    "list" => self.prefs.view = ViewChoice::List,
+                    "board" => self.prefs.view = ViewChoice::Board,
+                    "palette" => self.toggle_palette(window, cx),
+                    "new" => self.open_new_card(Status::Backlog, window, cx),
+                    "settings" => self.settings_open = true,
+                    "light" => self.set_theme(ThemeChoice::Light, window, cx),
+                    "dark" => self.set_theme(ThemeChoice::Dark, window, cx),
+                    "vim" => self.prefs.vim_keys = true,
+                    _ => {}
+                },
+            }
+        }
+        cx.notify();
     }
 }

@@ -77,6 +77,7 @@ impl Mdk {
                             .id(("list-row", row))
                             .flex()
                             .items_center()
+                            .w_full()
                             .h_8()
                             .border_t_1()
                             .border_color(c.border)
