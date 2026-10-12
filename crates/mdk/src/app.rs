@@ -579,7 +579,17 @@ impl Mdk {
                 .zip(new[prefix..].iter().rev())
                 .take_while(|(a, b)| a == b)
                 .count();
+            // A column showing its top keeps showing its top, even when new cards sort above
+            // the old first one. Otherwise the list would hold on to that card and look scrolled.
+            let top = self.lists[i].logical_scroll_top();
+            let at_top = top.item_ix == 0 && top.offset_in_item == px(0.);
             self.lists[i].splice(prefix..old.len() - suffix, new.len() - prefix - suffix);
+            if at_top {
+                self.lists[i].scroll_to(ListOffset {
+                    item_ix: 0,
+                    offset_in_item: px(0.),
+                });
+            }
             self.columns[i] = new;
         }
     }

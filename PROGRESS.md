@@ -45,22 +45,35 @@ Three defects showed up, none of which a headless test could see. All are fixed:
 
 `MDK_SHOW` opens screens at launch for checks like this: `MDK_SHOW="card=writing/x.md;preview" cargo run -p mdk`.
 
-Still not seen: the Done column and sideways scrolling, the lower half of the preview (code, maths, Mermaid) in the real app, the menus, and anything that needs a click.
+A second pass, with a wider window and a card holding only the preview's lower half, showed all five columns with Done's "archive" action, and the code block header, maths, a bad formula in red, the Mermaid flowchart, a table and escaped HTML all rendering in the real app. It also showed a fourth defect, now fixed: a column could start scrolled partway down when a second project's cards sorted above the first one's.
+
+Still not seen: sideways scrolling, the native menu, the dropdowns and the move menu open, and anything that needs a click. Inline code in the preview has a teal background (it takes the theme's accent colour), which is louder than Electron's.
+
+## Measurements, 12 October 2026
+
+With `scripts/bench.sh` on the M1, mdk 0.1.0 release build against the Electron build in `../MD-Kanban/release`:
+
+- Download: `dist/mdk_0.1.0_aarch64.dmg` is 11.0 MB. Electron's dmg is 196 MB.
+- App on disk: 28 MB against 603 MB.
+- Idle memory after 600 s, all of each app's processes, both running at once: 67 MB against 250 MB.
+- Launch to first window, median of 5 warm launches: 515 ms (497, 530, 515, 418, 656) against 521 ms (572, 509, 486, 521, plus a first launch of 3,867 ms). mdk's first launch after a build was 1,518 ms.
+
+Limits of these numbers: the Electron desktop build has no saved project list on this machine and `clinicos` is not here, so memory and launch were taken with no project connected in either app. Launch to first window does not show when the board is drawn. On that measure the apps tie, so NFR-01's "beat Electron on cold start" is not shown. Edit-to-screen time is not measured for Electron.
 
 ## What is left
 
-Everything in the spec is built except single-instance on Windows and handling the reduce-motion setting. What is missing is checking. In order of how much it matters:
+Everything in the spec is built. What is missing is checking. In order of how much it matters:
 
-1. Look at it. The whole UI was built with the screen locked, so not one screen has been compared with `references/electron-board-screenshot.png`. Run `cargo run --release -p mdk`.
+1. Look at it next to Electron. The main screens have been captured and four defects fixed (see "First look"), but nobody has compared it card by card with `references/electron-board-screenshot.png` on the same folders. Run `cargo run --release -p mdk`.
 2. Use it by hand on macOS: drag, the menus, the date picker, clicking links and folded callouts in the preview, Vim keys, find in card, IME input.
 3. Open the same folder in the Electron app and mdk at once (NFR-08).
-4. Run `scripts/bench.sh` for both apps and fill in the README's table (NFR-01).
+4. Run `scripts/bench.sh` for both apps on the real 169-card board. The README has numbers for an empty board only (NFR-01).
 5. Try it on Windows and Linux, then push a `v0.1.0` tag to make the release (FR-PKG-01, NFR-05). Pushing the tag publishes a public release, so that is Safi's call.
-6. Single instance on Windows, and reduce motion.
+6. Try single instance and reduce motion by hand. Both are built: single instance is tested on macOS and Linux and compiles on Windows, and reduce motion is gpui-kit's own reading of the OS setting, re-read when the window is activated.
 
 ## Acceptance checklist
 
-65 of 98 boxes are ticked. A tick means an automated test covers it. An open box says what is missing. Nothing is ticked on the strength of the code looking right.
+66 of 98 boxes are ticked. A tick means an automated test covers it. An open box says what is missing. Nothing is ticked on the strength of the code looking right.
 
 ### POC (proves the core idea, end of M3)
 - [ ] **FR-PROJ-01** Connect folder opens the native picker, and the chosen folder shows as a selected project with its cards.
@@ -117,7 +130,7 @@ Board and cards
 - [x] **FR-BOARD-01** Five columns with Electron's names and colours.
   - Checked: names and colours are constants in `mdk-format`. The look is not checked.
 - [ ] **FR-BOARD-02** Column header shows dot, name, count and "+", plus "+ Add card" at the bottom.
-  - Open: Built. Not seen by eye.
+  - Open: Seen in the real window: dot, name, count, "+", "archive" on Done, and "+ Add card". The buttons have not been clicked.
 - [x] **FR-BOARD-03** Cards are sorted by `order`.
   - Checked: board test
 - [ ] **FR-BOARD-04** Horizontal board scroll, per-column vertical scroll, and no vertical overscroll of the board.
@@ -127,7 +140,7 @@ Board and cards
 - [ ] **FR-BOARD-06** A 1,000-card project scrolls and drags without frames over 33 ms.
   - Open: Frame times on 1,000 cards are not measured. Scan (31 ms) and filtering (0.3 ms) are, in a release build.
 - [ ] **FR-CARD-01** The card face matches the Electron screenshot for the same files.
-  - Open: Built from Electron's template. The side-by-side comparison with the screenshot is not done.
+  - Open: Seen in the real window on the Electron repo's own cards, and it matches the screenshot's structure. Not compared card by card.
 - [x] **FR-CARD-02** Clicking a card opens the editor sheet.
   - Checked: app test
 - [ ] **FR-CARD-03** The "⋯" menu moves the card to the end of the chosen column, with the current column disabled.
@@ -159,7 +172,7 @@ Creating
 
 Card editor
 - [ ] **FR-EDIT-01** The sheet shows path, title, field grid with date picker, and labels. Expand works.
-  - Open: Built. Not seen by eye. Expand is not tested.
+  - Open: Seen in the real window: path, title, the field grid with the date picker, labels. Expand is not tested.
 - [x] **FR-EDIT-02** Typing then closing within 100 ms saves to the file.
   - Checked: editor test
 - [x] **FR-EDIT-03** Renaming the title updates the body's first `# ` heading.
@@ -181,7 +194,7 @@ Card editor
 
 Markdown editor
 - [ ] **FR-MDE-01** Markdown highlighting, wrapping, active line, selection matches and placeholder, in both themes.
-  - Open: Uses gpui-kit's editor with the markdown grammar. Not seen by eye. Headings are bold and coloured, not bigger (amended in M0).
+  - Open: Seen in the real window after the syntax colours were fixed: bold headings, teal links, dimmed markup. Headings are bold, not bigger (amended in M0). Active line and selection matches are not checked.
 - [x] **FR-MDE-02** All 20 toolbar actions behave like Electron's, and the ported `md-commands.check.ts` cases pass.
   - Checked: all 24 ported cases pass, plus editor tests
 - [ ] **FR-MDE-03** ⌘B, ⌘I, ⌘E, ⌘F, undo and redo, Tab and Shift-Tab, and list continuation on Enter.
@@ -199,7 +212,7 @@ Vim
 
 Preview
 - [ ] **FR-PREV-01** GFM renders: tables (scroll when wide), task lists, footnotes, strikethrough, blockquotes, rules and code.
-  - Open: gpui-kit's own GitHub-flavoured markdown. Not seen by eye.
+  - Open: Seen in the real window: headings, lists, task lists, a table, inline code, a code block. Footnotes and wide tables are not checked.
 - [x] **FR-PREV-02** The Subtasks box ticks the right `- [ ]` line in the file, and the card face count updates.
   - Checked: editor test
 - [x] **FR-PREV-03** Code blocks are highlighted, with a language or title header and a working Copy.
@@ -232,14 +245,14 @@ Filters, list and palette
 Live updates
 - [x] **FR-LIVE-02** mdk's own saves don't trigger a reload or a clash banner.
   - Checked: store tests on three OSes
-- [ ] **FR-LIVE-03** The Auto-refresh switch pauses and resumes updates and persists, and "checked" shows the time.
-  - Open: Built. The pause is not tested.
+- [x] **FR-LIVE-03** The Auto-refresh switch pauses and resumes updates and persists, and "checked" shows the time.
+  - Checked: app test with the real watcher: paused updates do not arrive, and switching back on catches up
 - [x] **FR-LIVE-04** A new subfolder created by an agent is picked up and watched.
   - Checked: store test
 
 App shell
 - [ ] **FR-APP-01** The header matches Electron's, with the "mdk" name.
-  - Open: Built. Not seen by eye.
+  - Open: Seen in the real window, in both themes. Not compared side by side with Electron.
 - [ ] **FR-APP-02** Dark (default), light and system themes, matching Electron's colours, and the choice persists.
   - Open: Colours converted from Electron's CSS, and the choice persists (tested). The match is not checked by eye.
 - [x] **FR-APP-03** Every pref in Stage 5's Prefs table survives a restart.
@@ -251,7 +264,7 @@ App shell
 - [ ] **FR-APP-06** Native macOS menu, and in-window menu on Windows and Linux, with the main commands.
   - Open: Built. A headless window has no menus, so neither kind has been seen.
 - [ ] **FR-APP-08** A second launch focuses the existing window.
-  - Open: Tested on macOS and Linux. Windows has no check yet.
+  - Open: Tested on macOS and Linux with a local socket. The Windows named pipe compiles and its test runs in CI, but a second launch has not been tried by hand on any OS.
 
 First run
 - [x] **FR-FIRST-01** With no projects, the welcome state shows Connect folder and Create sample project.
@@ -265,13 +278,13 @@ Agent contract and release
 - [x] **FR-AGENT-01** `AGENTS.md` and `skills/mdk/SKILL.md` ship in the repo, and the Electron format rules hold unchanged.
   - Checked: both files are in the repo
 - [ ] **FR-PKG-01** A `v*` tag builds a dmg, an NSIS exe and an AppImage on a GitHub release, and each installs and runs.
-  - Open: No tag has been pushed. Locally the macOS `.app` builds. The `.dmg` step failed on its Finder script because the screen was locked.
+  - Open: No tag has been pushed. On this Mac the `.app` and the `.dmg` both build (11.0 MB). The Windows and Linux packages and the release workflow have never run.
 - [ ] **FR-PKG-02** The README covers install, unsigned-app steps, the file format, agents and the before and after numbers.
-  - Open: Everything is in the README except three of the four speed numbers.
+  - Open: Everything is in the README. The speed numbers are for an empty board, not the 169-card one.
 
 Non-functional
 - [ ] **NFR-01** mdk beats Electron on download size, cold start, idle memory and edit-to-screen time (numbers in the README). Filter typing updates within 100 ms on 1,000 cards.
-  - Open: Size is measured: 28 MB against 603 MB, about 12 MB compressed against 196 MB. Cold start, idle memory at 10 minutes and edit-to-screen time are not measured for either app.
+  - Open: Download size, app size and idle memory beat Electron (11 MB against 196 MB, 67 MB against 250 MB idle). Launch to first window ties. Edit-to-screen time is not compared. Memory and launch were measured on an empty board.
 - [ ] **NFR-02** No network crates in `Cargo.lock` (cargo-deny ban passes). No requests made (checked with Little Snitch or an equivalent).
   - Open: `cargo-deny` bans pass in CI. No traffic check has been run.
 - [ ] **NFR-03** Every feature works with networking turned off.
@@ -281,7 +294,7 @@ Non-functional
 - [ ] **NFR-05** The release checklist passes on macOS 13+, Windows 11 and Ubuntu 22.04.
   - Open: Not started. It needs the three machines.
 - [ ] **NFR-06** All UI is keyboard reachable with visible focus, the contrast script passes both themes (4.5:1 text, 3:1 UI), and reduce motion is respected.
-  - Open: The contrast test passes for both themes. Keyboard reach is partly tested. The reduce-motion setting is not handled: mdk has no animations of its own, but gpui-kit's are not switched off.
+  - Open: The contrast test passes for both themes. Keyboard reach is partly tested. Reduce motion is read from the OS by gpui-kit at start and again when the window is activated, but nobody has switched it on and looked.
 - [x] **NFR-07** No test or manual run ever leaves a truncated or corrupted card; files mdk can't parse are never rewritten by board actions.
   - Checked: store, board and editor tests
 - [ ] **NFR-08** Electron and mdk open the same folder at once, editing in both, with no corruption.

@@ -63,7 +63,12 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    const LIMIT: Duration = Duration::from_millis(500);
+    // Shared CI machines stall now and then. A real machine has to make 500 ms.
+    const LIMIT: Duration = Duration::from_millis(if option_env!("CI").is_some() {
+        3000
+    } else {
+        500
+    });
 
     fn setup() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

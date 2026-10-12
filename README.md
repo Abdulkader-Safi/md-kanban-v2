@@ -98,16 +98,21 @@ mdk never runs an agent. An agent needs file access to the folder and nothing el
 
 ## Size and speed
 
-Measured on an M1 MacBook, 11 October 2026, mdk 0.1.0 against the Electron app's existing build.
+Measured on an M1 MacBook, 12 October 2026: mdk 0.1.0 against the Electron app's existing build, with `scripts/bench.sh`.
 
 | | mdk | Electron MD Kanban |
 | --- | --- | --- |
+| Download (`.dmg`) | 11 MB | 196 MB |
 | App on disk | 28 MB | 603 MB |
-| Compressed disk image | about 12 MB | 196 MB |
-| Scan of 1,000 cards | 31 ms | not measured |
-| One filter keystroke on 1,000 cards | 0.3 ms | not measured |
+| Memory after 10 minutes idle, all processes | 67 MB | 250 MB |
+| Launch to first window, warm (median of 5) | 515 ms | 521 ms |
+| Launch to first window, first run after install | 1.5 s | 3.9 s |
 
-Not measured yet for either app: cold start to a rendered board, idle memory after 10 minutes, and the time from an agent saving a file to the board showing it. mdk's watcher tests bound that last one at 500 ms. One rough reading: mdk held 104 MB of memory a few seconds after opening a 35-card board. `scripts/bench.sh` takes the size, start and memory readings for either app.
+The memory and launch rows were taken with no project connected in either app, because the Electron build on this machine has no saved projects. They are not the 169-card comparison the spec asks for.
+
+Launch time is a tie on this measure. It stops at the first window, and Electron opens its window before its page has loaded, so it does not show which app draws the board first.
+
+mdk only, on a generated 1,000-card project in a release build: a full scan takes 31 ms and one filter keystroke 0.3 ms. The time from an agent saving a file to the board showing it is bounded at 500 ms by the watcher tests. It is not measured for Electron.
 
 ## Settings and logs
 
