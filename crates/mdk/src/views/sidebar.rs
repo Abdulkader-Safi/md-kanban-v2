@@ -193,7 +193,7 @@ impl Mdk {
                     .px_4()
                     .border_b_1()
                     .border_color(c.border)
-                    .child(div().size_3().bg(c.primary))
+                    .child(icon("layout-kanban").size_5().text_color(c.link))
                     .child(
                         div()
                             .flex_1()
