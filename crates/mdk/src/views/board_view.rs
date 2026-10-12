@@ -300,6 +300,8 @@ impl Mdk {
             .gap_2()
             .p_4()
             .overflow_x_scroll()
+            // A plain wheel scrolls the column under the pointer, never the board sideways.
+            .restrict_scroll_to_axis()
             .track_scroll(&self.board_scroll)
             .on_drag_move(
                 cx.listener(|this, ev: &DragMoveEvent<DragCard>, _, cx| {
@@ -307,6 +309,33 @@ impl Mdk {
                 }),
             )
             .children(columns)
+            // Cmd (Ctrl elsewhere) with the wheel scrolls the board sideways. It is caught in
+            // the capture phase so the column under the pointer stays where it is.
+            .child(
+                canvas(|_, _, _| (), {
+                    let scroll = self.board_scroll.clone();
+                    move |_, _, window, _| {
+                        let (scroll, line) = (scroll.clone(), window.line_height());
+                        window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture
+                                || !ev.modifiers.secondary()
+                                || !scroll.bounds().contains(&ev.position)
+                            {
+                                return;
+                            }
+                            let delta = ev.delta.pixel_delta(line);
+                            let mut offset = scroll.offset();
+                            offset.x = (offset.x + delta.y + delta.x)
+                                .clamp(-scroll.max_offset().x, px(0.));
+                            scroll.set_offset(offset);
+                            window.refresh();
+                            cx.stop_propagation();
+                        });
+                    }
+                })
+                .absolute()
+                .size_0(),
+            )
     }
 
     fn column(
