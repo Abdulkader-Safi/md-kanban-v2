@@ -1,6 +1,6 @@
 //! The New card dialog, with quick-add syntax in the title and three templates.
 
-use super::{Colors, choice, field};
+use super::{Colors, choice, dialog, dialog_footer, dialog_header, field, icon_button, kbd, label};
 use crate::app::{Mdk, today};
 use crate::board::NewCard;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -167,146 +167,137 @@ impl Mdk {
                 .py_0p5()
                 .border_1()
                 .border_color(c.border)
+                .text_color(c.muted_fg)
                 .cursor_pointer()
-                .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
+                .hover(|s| s.bg(c.secondary).text_color(c.fg))
                 .child(id)
                 .on_click(
                     cx.listener(move |this, _, window, cx| this.apply_template(kind, window, cx)),
                 )
         };
 
-        // A click that starts and ends on the backdrop closes the dialog. A drag that starts
-        // inside the panel and ends outside does not, because the panel took the mouse down.
-        div()
-            .id("new-card-backdrop")
-            .absolute()
-            .inset_0()
+        let close = cx
+            .listener(|this: &mut Mdk, _: &ClickEvent, window, cx| this.close_new_card(window, cx));
+        let (backdrop, panel) = dialog("new-card", 560., c, close);
+        let body = div()
             .flex()
-            .items_center()
-            .justify_center()
-            .bg(black().opacity(0.4))
-            .on_click(cx.listener(|this, _, window, cx| this.close_new_card(window, cx)))
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .child(Input::new(&form.title))
+            .when(!hint.is_empty(), |d| {
+                d.child(
+                    div()
+                        .font_family(mono.clone())
+                        .text_size(px(11.))
+                        .text_color(c.link)
+                        .child(format!("Will set: {hint}")),
+                )
+            })
             .child(
                 div()
-                    .id("new-card")
-                    .occlude()
-                    .w(px(512.))
-                    .max_w_full()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_xs()
+                    .child(label("TEMPLATE", c, cx).mr_1())
+                    .child(template_button("bug", Template::Bug, cx))
+                    .child(template_button("feature", Template::Feature, cx))
+                    .child(template_button("chore", Template::Chore, cx)),
+            )
+            .child(Textarea::new(&form.body).font_family(mono.clone()))
+            .child(
+                div()
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .p_4()
-                    .bg(c.bg)
-                    .border_1()
-                    .border_color(c.border)
-                    .shadow_lg()
-                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(field("STATUS", c, cx).child(choice(
+                        "new-status",
+                        Status::ALL.map(|s| (s, s.name())),
+                        form.status,
+                        c,
+                        cx,
+                        |this, status, _, cx| {
+                            if let Some(form) = &mut this.new_card {
+                                form.status = status;
+                            }
+                            cx.notify();
+                        },
+                    )))
+                    .child(field("PRIORITY", c, cx).child(choice(
+                        "new-priority",
+                        Priority::ALL.map(|p| (p, p.as_str())),
+                        form.priority,
+                        c,
+                        cx,
+                        |this, priority, _, cx| {
+                            if let Some(form) = &mut this.new_card {
+                                form.priority = priority;
+                            }
+                            cx.notify();
+                        },
+                    )))
                     .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::BOLD)
-                            .child("New card"),
+                        field("ASSIGNEE", c, cx)
+                            .child(div().w(px(200.)).child(Input::new(&form.assignee).small())),
                     )
-                    .child(Input::new(&form.title))
-                    .when(!hint.is_empty(), |d| {
-                        d.child(
+                    .child(
+                        field("DUE", c, cx).child(
+                            div().w(px(200.)).child(
+                                DatePicker::new(&form.due)
+                                    .small()
+                                    .cleanable(true)
+                                    .placeholder("No due date"),
+                            ),
+                        ),
+                    )
+                    .child(
+                        field("LABELS", c, cx)
+                            .child(div().flex_1().child(Input::new(&form.labels).small())),
+                    )
+                    .child(
+                        field("FOLDER", c, cx).child(
                             div()
-                                .font_family(mono.clone())
-                                .text_size(px(11.))
-                                .text_color(c.link)
-                                .child(format!("Will set: {hint}")),
-                        )
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .text_xs()
-                            .child(div().text_color(c.muted_fg).child("Template:"))
-                            .child(template_button("bug", Template::Bug, cx))
-                            .child(template_button("feature", Template::Feature, cx))
-                            .child(template_button("chore", Template::Chore, cx)),
-                    )
-                    .child(Textarea::new(&form.body).font_family(mono.clone()))
-                    .child(
-                        div()
-                            .grid()
-                            .grid_cols(2)
-                            .gap_2()
-                            .child(field("Status", c).child(choice(
-                                "new-status",
-                                Status::ALL.map(|s| (s, s.name())),
-                                form.status,
-                                c,
-                                cx,
-                                |this, status, _, cx| {
-                                    if let Some(form) = &mut this.new_card {
-                                        form.status = status;
-                                    }
-                                    cx.notify();
-                                },
-                            )))
-                            .child(field("Priority", c).child(choice(
-                                "new-priority",
-                                Priority::ALL.map(|p| (p, p.as_str())),
-                                form.priority,
-                                c,
-                                cx,
-                                |this, priority, _, cx| {
-                                    if let Some(form) = &mut this.new_card {
-                                        form.priority = priority;
-                                    }
-                                    cx.notify();
-                                },
-                            )))
-                            .child(field("Assignee", c).child(Input::new(&form.assignee).small()))
-                            .child(
-                                field("Due date", c).child(
-                                    DatePicker::new(&form.due)
-                                        .small()
-                                        .cleanable(true)
-                                        .placeholder("No due date"),
-                                ),
-                            )
-                            .child(field("Labels", c).child(Input::new(&form.labels).small()))
-                            .child(
-                                field("Work subfolder", c)
-                                    .child(Input::new(&form.folder).small().font_family(mono)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .pt_1()
-                            .child(
-                                Button::new("new-card-cancel")
-                                    .ghost()
-                                    .small()
-                                    .label("Cancel")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_new_card(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("new-card-create")
-                                    .primary()
-                                    .small()
-                                    .label("Create card")
-                                    .disabled(empty)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit_new_card(window, cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(c.muted_fg)
-                            .child("Tip: press N anywhere to create a card."),
+                                .w(px(200.))
+                                .child(Input::new(&form.folder).small().font_family(mono)),
+                        ),
                     ),
-            )
+            );
+        // A click that starts and ends on the scrim closes the dialog. A drag that starts
+        // inside the panel and ends outside does not, because the panel took the mouse down.
+        backdrop.items_center().child(
+            panel
+                .child(dialog_header("New card", c).child(
+                    icon_button("new-card-x", "x", c).on_click(
+                        cx.listener(|this, _, window, cx| this.close_new_card(window, cx)),
+                    ),
+                ))
+                .child(body)
+                .child(
+                    dialog_footer(c)
+                        .text_xs()
+                        .text_color(c.muted_fg)
+                        .child(kbd("N", c, cx))
+                        .child("new card from anywhere")
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("new-card-cancel")
+                                .outline()
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_new_card(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("new-card-create")
+                                .primary()
+                                .label("Create card")
+                                .disabled(empty)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.submit_new_card(window, cx)
+                                })),
+                        ),
+                ),
+        )
     }
 }

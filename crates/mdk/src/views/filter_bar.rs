@@ -1,11 +1,10 @@
-//! The filter bar above the board: search, priority chips, assignee, labels, due, saved
-//! views, and the Board or List switch.
+//! The filter bar above the board: priority chips, due, assignee, labels and saved views.
+//! Search and the Board or List switch sit in the top bar.
 
-use super::Colors;
+use super::{Colors, chip, label};
 use crate::app::{FilterMenu, Mdk};
 use crate::board::{DueFilter, Filters};
-use crate::prefs::ViewChoice;
-use crate::theme::{icon, priority_colors};
+use crate::theme::icon;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::*;
@@ -16,11 +15,13 @@ use mdk_format::Priority;
 fn link(id: &'static str, text: &'static str, c: Colors) -> Stateful<Div> {
     div()
         .id(id)
+        .px_2()
+        .py_1()
         .text_xs()
+        .font_weight(FontWeight::MEDIUM)
         .text_color(c.muted_fg)
-        .underline()
         .cursor_pointer()
-        .hover(|s| s.text_color(c.fg))
+        .hover(|s| s.bg(c.secondary).text_color(c.fg))
         .child(text)
 }
 
@@ -57,13 +58,14 @@ impl Mdk {
             .flex()
             .items_center()
             .gap_1()
-            .h_8()
+            .h_7()
             .px_2()
+            .bg(c.muted)
             .border_1()
             .border_color(c.border)
             .text_xs()
             .cursor_pointer()
-            .hover(|s| s.bg(c.secondary))
+            .hover(|s| s.border_color(c.strong))
             .child(label)
             .child(icon("chevron-down").size_3().text_color(c.muted_fg))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -84,8 +86,7 @@ impl Mdk {
                                 .p_1()
                                 .bg(c.card)
                                 .border_1()
-                                .border_color(c.border)
-                                .shadow_lg()
+                                .border_color(c.strong)
                                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                                     this.filter_menu = None;
                                     cx.notify();
@@ -104,18 +105,7 @@ impl Mdk {
 
         let chips = Priority::ALL.into_iter().enumerate().map(|(n, priority)| {
             let on = filters.priorities.contains(&priority);
-            let (fg, bg) = priority_colors(priority, c.dark);
-            div()
-                .id(("priority-chip", n))
-                .px_2()
-                .py_1()
-                .border_1()
-                .text_xs()
-                .cursor_pointer()
-                .map(|d| match on {
-                    true => d.bg(bg).text_color(fg).border_color(fg),
-                    false => d.border_color(c.border).hover(|s| s.bg(c.secondary)),
-                })
+            chip(("priority-chip", n), on, c)
                 .child(priority.as_str())
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.toggle_priority_filter(priority, cx)),
@@ -162,11 +152,14 @@ impl Mdk {
                 .gap_1()
                 .pl_2()
                 .pr_1()
-                .py_0p5()
-                .bg(c.secondary)
+                .py_1()
+                .border_1()
+                .border_color(c.border)
                 .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(c.muted_fg)
                 .cursor_pointer()
-                .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
+                .hover(|s| s.bg(c.secondary).text_color(c.fg))
                 .child(view.name.clone())
                 .on_click(cx.listener(move |this, _, window, cx| this.apply_view(n, window, cx)))
                 .child(
@@ -183,74 +176,47 @@ impl Mdk {
         });
         let views: Vec<_> = views.collect();
 
-        let view = self.prefs.view;
-        let segment =
-            |id: &'static str, label: &'static str, choice: ViewChoice, cx: &mut Context<Self>| {
-                div()
-                    .id(id)
-                    .px_2p5()
-                    .py_1()
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .map(|d| match view == choice {
-                        true => d.bg(c.secondary).text_color(c.fg),
-                        false => d.text_color(c.muted_fg).hover(|s| s.text_color(c.fg)),
-                    })
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_view(choice, cx)))
-            };
+        let divider = || div().w_px().h_5().flex_shrink_0().bg(c.border);
 
         div()
             .flex()
+            .flex_shrink_0()
+            .flex_wrap()
             .items_center()
             .gap_2()
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(c.border)
+            .child(label("PRIORITY", c, cx))
+            .children(chips)
+            .child(divider())
+            .child(label("DUE", c, cx))
+            .child(self.dropdown(FilterMenu::Due, due_text, due_options, c, cx))
+            .child(divider())
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .w(px(288.))
-                            .child(Input::new(&self.search).small().cleanable(true)),
-                    )
-                    .children(chips)
-                    .child(
-                        div()
-                            .w(px(112.))
-                            .child(Input::new(&self.assignee_filter).small()),
-                    )
-                    .child(self.dropdown(FilterMenu::Labels, label_text, label_options, c, cx))
-                    .child(self.dropdown(FilterMenu::Due, due_text, due_options, c, cx))
-                    .child(link("reset-filters", "reset", c).on_click(cx.listener(
+                    .w(px(140.))
+                    .child(Input::new(&self.assignee_filter).small()),
+            )
+            .child(self.dropdown(FilterMenu::Labels, label_text, label_options, c, cx))
+            .when(active, |d| {
+                d.child(
+                    link("reset-filters", "Clear filters", c).on_click(cx.listener(
                         |this, _, window, cx| this.set_filters(Filters::default(), window, cx),
-                    )))
-                    .child(div().px_2().py_0p5().text_xs().map(|d| match active {
-                        true => d.bg(c.accent).text_color(c.accent_fg).child("filtered"),
-                        false => d.bg(c.secondary).child("all"),
-                    }))
-                    .map(|d| match &self.view_name {
-                        Some(name) => d.child(div().w(px(144.)).child(Input::new(name).small())),
-                        None => d.child(link("save-view", "save view", c).on_click(
-                            cx.listener(|this, _, window, cx| this.ask_view_name(window, cx)),
-                        )),
-                    })
-                    .children(views),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_shrink_0()
-                    .items_center()
-                    .p_0p5()
-                    .border_1()
-                    .border_color(c.border)
-                    .child(segment("view-board", "Board", ViewChoice::Board, cx))
-                    .child(segment("view-list", "List", ViewChoice::List, cx)),
-            )
+                    )),
+                )
+            })
+            .child(div().flex_1())
+            .child(label("VIEWS", c, cx))
+            .children(views)
+            .map(|d| match &self.view_name {
+                Some(name) => d.child(div().w(px(144.)).child(Input::new(name).small())),
+                None => {
+                    d.child(link("save-view", "Save view", c).on_click(
+                        cx.listener(|this, _, window, cx| this.ask_view_name(window, cx)),
+                    ))
+                }
+            })
     }
 }

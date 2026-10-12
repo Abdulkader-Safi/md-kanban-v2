@@ -1,10 +1,10 @@
-//! The mdk theme: Electron MD Kanban's colours as a gpui-kit theme, plus the bundled
-//! Geist font and Tabler icons.
+//! The mdk theme: ink surfaces and one lime accent as a gpui-kit theme, plus the bundled
+//! Schibsted Grotesk and JetBrains Mono fonts and Tabler icons.
 
 use crate::prefs::ThemeChoice;
 use gpui_kit::component::{Icon, Theme, ThemeMode, ThemeSet};
 use gpui_kit::{App, AssetSource, Hsla, Result, SharedString, Window, rgb};
-use mdk_format::Priority;
+use mdk_format::{Priority, Status};
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -85,12 +85,19 @@ pub fn icon(name: &'static str) -> Icon {
 /// Load the fonts and register the two mdk themes. Call once, after `gpui_kit::init`.
 pub fn init(cx: &mut App) {
     cx.text_system()
-        .add_fonts(vec![
-            Cow::Borrowed(include_bytes!("../assets/fonts/Geist-400.otf").as_slice()),
-            Cow::Borrowed(include_bytes!("../assets/fonts/Geist-500.otf").as_slice()),
-            Cow::Borrowed(include_bytes!("../assets/fonts/Geist-600.otf").as_slice()),
-            Cow::Borrowed(include_bytes!("../assets/fonts/Geist-700.otf").as_slice()),
-        ])
+        .add_fonts(
+            [
+                include_bytes!("../assets/fonts/SchibstedGrotesk-Regular.ttf").as_slice(),
+                include_bytes!("../assets/fonts/SchibstedGrotesk-Medium.ttf").as_slice(),
+                include_bytes!("../assets/fonts/SchibstedGrotesk-SemiBold.ttf").as_slice(),
+                include_bytes!("../assets/fonts/SchibstedGrotesk-Bold.ttf").as_slice(),
+                include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf").as_slice(),
+                include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf").as_slice(),
+                include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf").as_slice(),
+            ]
+            .map(Cow::Borrowed)
+            .to_vec(),
+        )
         .expect("the bundled fonts load");
     let set: ThemeSet = serde_json::from_str(include_str!("../assets/theme/mdk.json"))
         .expect("the bundled theme parses");
@@ -114,28 +121,45 @@ pub fn apply(choice: ThemeChoice, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Badge colours for a priority: (text, background). The light theme uses darker
-/// shades, so the text keeps a 4.5:1 contrast on the tinted badge.
+/// Badge colours for a priority: (text and outline, background). The badge is an
+/// outline, so the background is clear.
 pub fn priority_colors(priority: Priority, dark: bool) -> (Hsla, Hsla) {
     let text = match (priority, dark) {
-        (Priority::Critical, true) => 0xf87171,
-        (Priority::High, true) => 0xfb923c,
-        (Priority::Medium, true) => 0x60a5fa,
-        (Priority::Low, true) => 0x9ca3af,
-        (Priority::Critical, false) => 0xb91c1c,
-        (Priority::High, false) => 0x9a3412,
-        (Priority::Medium, false) => 0x1d4ed8,
-        (Priority::Low, false) => 0x4b5563,
+        (Priority::Critical, true) => 0xff6b63,
+        (Priority::High, true) => 0xffa24a,
+        (Priority::Medium, true) => 0x6fa8ff,
+        (Priority::Low, true) => 0x9b9ba3,
+        (Priority::Critical, false) => 0xc2241c,
+        (Priority::High, false) => 0xa84b00,
+        (Priority::Medium, false) => 0x1f55c4,
+        (Priority::Low, false) => 0x5f5f66,
     };
     let text: Hsla = rgb(text).into();
-    (text, text.opacity(0.15))
+    (text, text.opacity(0.))
 }
 
-/// The overdue and due-today colours, as text on a 15% tint of themselves.
+/// The column colour of a status.
+pub fn status_color(status: Status, dark: bool) -> Hsla {
+    rgb(match (status, dark) {
+        (Status::Backlog, true) => 0x8a8a93,
+        (Status::Todo, true) => 0x6fa8ff,
+        (Status::InProgress, true) => 0xffb020,
+        (Status::Review, true) => 0xa78bfa,
+        (Status::Done, true) => 0x3ddc84,
+        (Status::Backlog, false) => 0x6b6b74,
+        (Status::Todo, false) => 0x1f55c4,
+        (Status::InProgress, false) => 0xa84b00,
+        (Status::Review, false) => 0x6d45d9,
+        (Status::Done, false) => 0x16803f,
+    })
+    .into()
+}
+
+/// The overdue and due-today colours.
 pub fn due_colors(dark: bool) -> (u32, u32) {
     if dark {
-        (0xf87171, 0xfbbf24)
+        (0xff6b63, 0xffb020)
     } else {
-        (0xb91c1c, 0x92400e)
+        (0xc2241c, 0xa84b00)
     }
 }

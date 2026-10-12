@@ -78,8 +78,8 @@ fn both_themes_meet_the_contrast_rules() {
         let sidebar = over(color("sidebar.background"), bg);
         let muted = over(color("muted.background"), bg);
         let secondary = over(color("secondary.background"), bg);
-        // Columns are the muted colour at 40% over the page.
-        let column = over(with_alpha(muted, 0.4), bg);
+        // Columns are the muted colour.
+        let column = muted;
         let muted_fg = color("muted.foreground");
 
         let mut check = |what: &str, fg: Rgb, on: Rgb, least: f64| {

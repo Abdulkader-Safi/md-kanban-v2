@@ -6,7 +6,7 @@
 //! field of the same card survives. If the file changes while the form has unsaved edits,
 //! nothing is written until the user picks a side.
 
-use super::{Colors, choice, field};
+use super::{Colors, choice, field, icon_button, label, status_dot, toggle};
 use crate::app::{Confirm, Mdk};
 use crate::board::{Card, CardKey};
 use crate::prefs::EditorTab;
@@ -752,36 +752,41 @@ impl Mdk {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .border_1()
-            .border_color(c.border)
-            .p_3()
+            .p_6()
             .when(!subtasks.is_empty(), |d| {
                 d.child(
                     div()
-                        .mb_3()
-                        .p_2()
+                        .mb_4()
+                        .px_4()
+                        .py_3()
                         .border_1()
                         .border_color(c.border)
-                        .bg(c.muted.opacity(0.4))
+                        .bg(c.muted)
                         .flex()
                         .flex_col()
-                        .gap_1()
+                        .gap_1p5()
                         .child(
                             div()
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(c.muted_fg)
-                                .child(format!("Subtasks {done}/{}", subtasks.len())),
+                                .child(format!("SUBTASKS {done}/{}", subtasks.len())),
                         )
                         .children(subtasks.iter().enumerate().map(|(n, subtask)| {
                             div()
                                 .id(("subtask", n))
                                 .flex()
                                 .items_center()
-                                .gap_2()
+                                .gap_2p5()
                                 .cursor_pointer()
                                 .hover(|s| s.bg(c.secondary))
-                                .child(if subtask.done { "☑" } else { "☐" })
+                                .child(div().size(px(14.)).flex_shrink_0().map(|d| {
+                                    match subtask.done {
+                                        true => d.bg(c.primary),
+                                        false => d.border_1().border_color(c.strong),
+                                    }
+                                }))
                                 .child(
                                     div()
                                         .when(subtask.done, |d| {
@@ -840,12 +845,13 @@ impl Mdk {
             .flex()
             .items_center()
             .gap_2()
-            .px_3()
+            .px_4()
             .py_2()
-            .border_1()
-            .border_color(c.danger.opacity(0.4))
-            .bg(c.danger.opacity(0.08))
-            .child(icon("alert-triangle").size_4())
+            .border_b_1()
+            .border_l_2()
+            .border_color(c.danger)
+            .bg(c.danger.opacity(0.1))
+            .child(icon("alert-triangle").size_4().text_color(c.danger))
             .child(div().flex_1().child(text))
     }
 
@@ -876,14 +882,20 @@ impl Mdk {
             |id: &'static str, label: &'static str, this_tab: EditorTab, cx: &mut Context<Self>| {
                 div()
                     .id(id)
-                    .px_2p5()
-                    .py_1()
+                    .flex()
+                    .items_center()
+                    .h_9()
+                    .px_3()
                     .text_xs()
                     .font_weight(FontWeight::MEDIUM)
+                    .border_b_2()
                     .cursor_pointer()
                     .map(|d| match tab == this_tab {
-                        true => d.bg(c.secondary).text_color(c.fg),
-                        false => d.text_color(c.muted_fg).hover(|s| s.text_color(c.fg)),
+                        true => d.border_color(c.primary),
+                        false => d
+                            .border_color(c.primary.opacity(0.))
+                            .text_color(c.muted_fg)
+                            .hover(|s| s.text_color(c.fg)),
                     })
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| this.set_editor_tab(this_tab, cx)))
@@ -895,7 +907,9 @@ impl Mdk {
                 .flex_wrap()
                 .items_center()
                 .gap_0p5()
-                .p_1()
+                .px_3()
+                .py_1p5()
+                .bg(c.card)
                 .border_b_1()
                 .border_color(c.border)
                 .children(
@@ -904,20 +918,23 @@ impl Mdk {
                         .enumerate()
                         .map(|(n, (name, label, tool, gap))| {
                             let (tool, label) = (*tool, *label);
-                            div()
-                                .id(("tool", n))
+                            icon_button(("tool", n), name, c)
                                 .when(*gap, |d| d.ml_2())
-                                .p_1()
-                                .text_color(c.muted_fg)
-                                .cursor_pointer()
-                                .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
-                                .child(icon(name).size_4())
                                 .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.format(tool, window, cx)
                                 }))
                         }),
                 );
+        // "-- NORMAL -- 2d" becomes a mode chip and the pending keys. A ":" command shows as typed.
+        let vim_status = editor.vim.status();
+        let (vim_mode, vim_rest) = match vim_status
+            .strip_prefix("-- ")
+            .and_then(|s| s.split_once(" --"))
+        {
+            Some((mode, rest)) => (Some(mode.to_string()), rest.trim().to_string()),
+            None => (None, vim_status),
+        };
 
         let markdown = div()
             .key_context("MdEditor")
@@ -976,8 +993,7 @@ impl Mdk {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .border_1()
-            .border_color(c.border)
+            .bg(c.muted)
             .when(!editor.raw_mode, |d| d.child(toolbar))
             .child(
                 Editor::new(&editor.body)
@@ -990,24 +1006,37 @@ impl Mdk {
             .when(self.vim_on(), |d| {
                 d.child(
                     div()
-                        .px_2()
-                        .py_1()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_4()
+                        .py_1p5()
+                        .bg(c.card)
                         .border_t_1()
                         .border_color(c.border)
                         .font_family(mono.clone())
-                        .text_size(px(11.))
+                        .text_size(px(10.))
                         .text_color(c.muted_fg)
-                        .child(editor.vim.status()),
+                        .when_some(vim_mode, |d, mode| {
+                            d.child(
+                                div()
+                                    .px_1p5()
+                                    .bg(c.primary)
+                                    .text_color(c.on_primary)
+                                    .child(mode),
+                            )
+                        })
+                        .child(vim_rest),
                 )
             });
 
         let preview = self.preview_tab(editor, c, cx);
 
         let fields = div()
-            .grid()
-            .grid_cols(2)
+            .flex()
+            .flex_col()
             .gap_2()
-            .child(field("Status", c).child(choice(
+            .child(field("STATUS", c, cx).child(choice(
                 "edit-status",
                 Status::ALL.map(|s| (s, s.name())),
                 editor.status,
@@ -1020,7 +1049,7 @@ impl Mdk {
                     this.editor_changed(window, cx);
                 },
             )))
-            .child(field("Priority", c).child(choice(
+            .child(field("PRIORITY", c, cx).child(choice(
                 "edit-priority",
                 Priority::ALL.map(|p| (p, p.as_str())),
                 editor.priority,
@@ -1033,26 +1062,34 @@ impl Mdk {
                     this.editor_changed(window, cx);
                 },
             )))
-            .child(field("Assignee", c).child(Input::new(&editor.assignee).small()))
             .child(
-                field("Due date", c).child(
-                    DatePicker::new(&editor.due)
-                        .small()
-                        .cleanable(true)
-                        .placeholder("No due date"),
+                field("ASSIGNEE", c, cx).child(
+                    div()
+                        .w(px(200.))
+                        .child(Input::new(&editor.assignee).small()),
                 ),
             )
             .child(
-                field("Labels", c)
-                    .col_span(2)
-                    .child(Input::new(&editor.labels).small()),
+                field("DUE", c, cx).child(
+                    div().w(px(200.)).child(
+                        DatePicker::new(&editor.due)
+                            .small()
+                            .cleanable(true)
+                            .placeholder("No due date"),
+                    ),
+                ),
+            )
+            .child(
+                field("LABELS", c, cx)
+                    .child(div().flex_1().child(Input::new(&editor.labels).small())),
             );
+        let vim_keys = self.prefs.vim_keys;
 
         div()
             .id("sheet-backdrop")
             .absolute()
             .inset_0()
-            .bg(black().opacity(0.3))
+            .bg(c.scrim)
             .on_click(cx.listener(|this, _, window, cx| this.close_editor(window, cx)))
             .child(
                 div()
@@ -1066,38 +1103,86 @@ impl Mdk {
                     .max_w_full()
                     .flex()
                     .flex_col()
-                    .gap_3()
-                    .p_4()
-                    .bg(c.bg)
+                    .bg(c.card)
                     .border_l_1()
-                    .border_color(c.border)
+                    .border_color(c.strong)
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .flex()
+                            .flex_shrink_0()
                             .items_center()
                             .gap_2()
+                            .h(px(48.))
+                            .pl_4()
+                            .pr_2()
+                            .border_b_1()
+                            .border_color(c.border)
+                            .child(status_dot(editor.status, c))
                             .child(
                                 div()
                                     .flex_1()
                                     .truncate()
                                     .font_family(mono.clone())
-                                    .text_xs()
-                                    .text_color(c.muted_fg)
+                                    .text_size(px(13.))
                                     .child(format!("{project}/{}", editor.key.rel_path)),
                             )
-                            .when(saving, |d| {
-                                d.child(div().size_2().rounded_full().bg(c.link))
-                            })
                             .child(
-                                Button::new("sheet-close")
-                                    .ghost()
-                                    .small()
-                                    .icon(icon("x"))
+                                div()
+                                    .font_family(mono.clone())
+                                    .text_size(px(10.))
+                                    .text_color(if saving { c.link } else { c.muted_fg })
+                                    .child(if saving { "SAVING" } else { "AUTOSAVES" }),
+                            )
+                            .child(
+                                icon_button("copy-ai-prompt", "robot", c)
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new("Copy AI prompt").build(window, cx)
+                                    })
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_editor(window, cx)
+                                        this.copy_ai_prompt(window, cx)
                                     })),
-                            ),
+                            )
+                            .child(
+                                icon_button(
+                                    "expand",
+                                    if expanded { "arrows-minimize" } else { "arrows-maximize" },
+                                    c,
+                                )
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(if expanded { "Collapse" } else { "Expand" })
+                                        .build(window, cx)
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.prefs.editor_expanded = !this.prefs.editor_expanded;
+                                    this.prefs_changed(cx);
+                                })),
+                            )
+                            .child(
+                                // Not `icon_button`: its hover is the neutral one, and a second
+                                // hover style panics.
+                                div()
+                                    .id("delete-card")
+                                    .flex()
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .justify_center()
+                                    .size_7()
+                                    .text_color(c.muted_fg)
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(c.danger.opacity(0.14)).text_color(c.danger))
+                                    .child(icon("trash").size_4())
+                                    .tooltip(|window, cx| Tooltip::new("Delete").build(window, cx))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(key) = this.open_card.clone() {
+                                            this.confirm = Some(Confirm::Delete(key));
+                                            cx.notify();
+                                        }
+                                    })),
+                            )
+                            .child(icon_button("sheet-close", "x", c).on_click(cx.listener(
+                                |this, _, window, cx| this.close_editor(window, cx),
+                            ))),
                     )
                     .when(editor.deleted, |d| {
                         d.child(
@@ -1131,7 +1216,10 @@ impl Mdk {
                         true => d
                             .child(
                                 div()
-                                    .text_lg()
+                                    .px_6()
+                                    .py_4()
+                                    .text_size(px(28.))
+                                    .line_height(px(34.))
                                     .font_weight(FontWeight::BOLD)
                                     .child(editor.base.data.title.clone()),
                             )
@@ -1139,27 +1227,37 @@ impl Mdk {
                                 "The frontmatter is not valid YAML. Fix it below: this is the whole file.",
                                 c,
                             )),
-                        false => d.child(Input::new(&editor.title).large()).child(fields),
+                        false => d.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_shrink_0()
+                                .gap_3()
+                                .px_6()
+                                .py_5()
+                                .border_b_1()
+                                .border_color(c.border)
+                                .child(Input::new(&editor.title).large())
+                                .child(fields),
+                        ),
                     })
                     .child(
                         div()
                             .flex()
+                            .flex_shrink_0()
                             .items_center()
-                            .gap_1()
+                            .gap_2()
+                            .pl_3()
+                            .pr_4()
+                            .border_b_1()
+                            .border_color(c.border)
                             .child(tab_button("tab-markdown", "Markdown", EditorTab::Markdown, cx))
                             .child(tab_button("tab-preview", "Preview", EditorTab::Preview, cx))
                             .child(div().flex_1())
-                            .child(
-                                Button::new("expand")
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(icon(if expanded { "arrows-minimize" } else { "arrows-maximize" }))
-                                    .label(if expanded { "Collapse" } else { "Expand" })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.prefs.editor_expanded = !this.prefs.editor_expanded;
-                                        this.prefs_changed(cx);
-                                    })),
-                            ),
+                            .child(label("VIM", c, cx))
+                            .child(toggle("sheet-vim", vim_keys, c).on_click(cx.listener(
+                                |this, _, _, cx| this.set_vim_keys(!this.prefs.vim_keys, cx),
+                            ))),
                     )
                     .map(|d| match tab == EditorTab::Preview && !editor.raw_mode {
                         true => d.child(preview),
@@ -1167,49 +1265,19 @@ impl Mdk {
                     })
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                Button::new("copy-ai-prompt")
-                                    .outline()
-                                    .small()
-                                    .icon(icon("robot"))
-                                    .label("Copy AI prompt")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.copy_ai_prompt(window, cx)
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .text_xs()
-                                    .text_color(c.muted_fg)
-                                    .child("Autosaves to the markdown file."),
-                            )
-                            .child(
-                                Button::new("delete-card")
-                                    .danger()
-                                    .small()
-                                    .icon(icon("trash"))
-                                    .label("Delete")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(key) = this.open_card.clone() {
-                                            this.confirm = Some(Confirm::Delete(key));
-                                            cx.notify();
-                                        }
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
                             .id("raw-toggle")
                             .flex()
+                            .flex_shrink_0()
                             .items_center()
                             .gap_1()
+                            .px_4()
+                            .py_2()
+                            .border_t_1()
+                            .border_color(c.border)
                             .text_xs()
                             .text_color(c.muted_fg)
                             .cursor_pointer()
+                            .hover(|s| s.text_color(c.fg))
                             .child(icon(if editor.raw_open { "chevron-down" } else { "chevron-right" }).size_3())
                             .child("Raw markdown file")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -1223,12 +1291,14 @@ impl Mdk {
                         d.child(
                             div()
                                 .id("raw-file")
+                                .flex_shrink_0()
                                 .max_h(px(200.))
                                 .overflow_y_scroll()
-                                .border_1()
+                                .border_t_1()
                                 .border_color(c.border)
-                                .bg(c.muted.opacity(0.4))
-                                .p_2()
+                                .bg(c.muted)
+                                .px_4()
+                                .py_3()
                                 .font_family(mono)
                                 .text_size(px(11.))
                                 .child(editor.preview_file(cx)),

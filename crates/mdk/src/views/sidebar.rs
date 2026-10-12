@@ -1,16 +1,15 @@
-//! The left sidebar: connect, projects, work folders, and the refresh toggles.
+//! The left sidebar: the brand, projects, work folders, and the refresh toggles.
 
-use super::Colors;
+use super::{Colors, label, toggle};
 use crate::app::Mdk;
 use crate::board::ProjectStatus;
-use crate::theme::icon;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Sizable};
+use crate::theme::{icon, status_color};
+use gpui_kit::component::{ActiveTheme, Icon};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use mdk_format::Status;
 
-/// One selectable row. Selected rows take the teal accent.
+/// One selectable row. The selected row has the accent edge.
 fn row(id: impl Into<ElementId>, selected: bool, c: Colors) -> Stateful<Div> {
     div()
         .id(id)
@@ -18,23 +17,27 @@ fn row(id: impl Into<ElementId>, selected: bool, c: Colors) -> Stateful<Div> {
         .items_center()
         .gap_2()
         .w_full()
-        .px_2()
+        .px_3()
+        .py_2()
+        .border_l_2()
         .cursor_pointer()
         .map(|d| match selected {
             true => d
-                .bg(c.accent)
-                .text_color(c.accent_fg)
+                .bg(c.secondary)
+                .border_color(c.primary)
                 .font_weight(FontWeight::MEDIUM),
-            false => d.hover(|s| s.bg(c.accent.opacity(0.5))),
+            false => d
+                .border_color(c.primary.opacity(0.))
+                .text_color(c.muted_fg)
+                .hover(|s| s.bg(c.secondary).text_color(c.fg)),
         })
 }
 
-fn heading(text: &'static str, c: Colors) -> Div {
-    div()
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(c.muted_fg)
-        .child(text)
+/// The icon at the start of a row, in the accent colour when the row is selected.
+fn row_icon(name: &'static str, selected: bool, c: Colors) -> Icon {
+    icon(name)
+        .size_4()
+        .text_color(if selected { c.link } else { c.muted_fg })
 }
 
 /// A small text action under the selected project. `hover` is its colour under the pointer.
@@ -80,17 +83,17 @@ impl Mdk {
                 .flex_col()
                 .child(
                     row(SharedString::from(format!("project-{id}")), is_selected, c)
-                        .py_1p5()
+                        .child(row_icon("folder-open", is_selected, c))
                         .child(div().flex_1().truncate().child(project.name.clone()))
                         .when(!ok, |d| {
                             d.child(icon("alert-triangle").size_3p5().text_color(c.danger))
                         })
                         .child(
                             div()
-                                .px_1()
-                                .bg(c.secondary)
-                                .text_color(c.fg)
-                                .text_size(px(10.))
+                                .font_family(mono.clone())
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(c.muted_fg)
                                 .child(counts.get(id.as_str()).copied().unwrap_or(0).to_string()),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -100,7 +103,7 @@ impl Mdk {
                 .when_some(problem, |d, problem| {
                     d.child(
                         div()
-                            .px_2()
+                            .px_4()
                             .pt_1()
                             .text_size(px(11.))
                             .text_color(c.danger)
@@ -111,9 +114,9 @@ impl Mdk {
                     d.child(
                         div()
                             .flex()
-                            .gap_2()
-                            .px_2()
-                            .pt_1()
+                            .gap_3()
+                            .px_4()
+                            .py_1()
                             .when(ok, |d| {
                                 d.child(
                                     link("project-rescan", "refresh", "rescan", c.fg, c).on_click(
@@ -144,22 +147,30 @@ impl Mdk {
         let workspaces = self.board.workspaces();
         let current = self.board.selected_workspace.clone();
         let folder = |name: Option<String>, cx: &mut Context<Self>| {
-            let label = name.clone().unwrap_or_else(|| "all".into());
-            row(
-                SharedString::from(format!("folder-{label}")),
-                current == name,
-                c,
-            )
-            .py_1()
-            .font_family(mono.clone())
-            .text_xs()
-            .child(label)
-            .on_click(cx.listener(move |this, _, _, cx| this.select_workspace(name.clone(), cx)))
+            let text = name.clone().unwrap_or_else(|| "all".into());
+            let selected = current == name;
+            row(SharedString::from(format!("folder-{text}")), selected, c)
+                .child(row_icon("layout-grid", selected, c))
+                .child(div().flex_1().truncate().child(text))
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.select_workspace(name.clone(), cx)),
+                )
         };
         let folders: Vec<_> = std::iter::once(None)
             .chain(workspaces.iter().cloned().map(Some))
             .map(|name| folder(name, cx))
             .collect();
+        let setting = |name: &'static str, switch: Stateful<Div>| {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_xs()
+                .text_color(c.muted_fg)
+                .child(div().flex_1().child(name))
+                .child(switch)
+        };
+        let watching = self.prefs.auto_refresh;
 
         div()
             .id("sidebar")
@@ -168,81 +179,102 @@ impl Mdk {
             .flex_shrink_0()
             .w(px(240.))
             .h_full()
-            .gap_3()
-            .p_3()
             .overflow_y_scroll()
             .bg(c.sidebar)
             .border_r_1()
             .border_color(c.border)
             .child(
-                Button::new("connect")
-                    .primary()
-                    .small()
-                    .w_full()
-                    .icon(icon("folder-open"))
-                    .label("Connect folder")
-                    .on_click(cx.listener(|this, _, _, cx| this.connect_folder(cx))),
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap_2p5()
+                    .h(px(48.))
+                    .px_4()
+                    .border_b_1()
+                    .border_color(c.border)
+                    .child(div().size_3().bg(c.primary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(20.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("mdk"),
+                    )
+                    .child(
+                        div()
+                            .font_family(mono.clone())
+                            .text_size(px(10.))
+                            .text_color(c.muted_fg)
+                            .child(env!("CARGO_PKG_VERSION")),
+                    ),
             )
-            .child(heading("PROJECTS", c))
+            .child(label("PROJECTS", c, cx).px_4().pt_4().pb_1p5())
             .child(
                 row("all-projects", selected.is_none(), c)
-                    .py_1p5()
-                    .child(icon("layout-grid").size_4())
+                    .child(row_icon("folders", selected.is_none(), c))
                     .child("All projects")
                     .on_click(cx.listener(|this, _, _, cx| this.select_project(None, cx))),
             )
             .children(projects)
+            .child(
+                row("connect", false, c)
+                    .child(icon("plus").size_4())
+                    .child("Add project")
+                    .on_click(cx.listener(|this, _, _, cx| this.connect_folder(cx))),
+            )
             .when(!workspaces.is_empty(), |d| {
-                d.child(heading("WORK FOLDERS", c).mt_2())
+                d.child(label("WORK FOLDERS", c, cx).px_4().pt_4().pb_1p5())
                     .child(div().flex().flex_col().children(folders))
             })
-            .child(div().flex_1())
+            .child(div().flex_1().min_h_4())
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .flex_shrink_0()
                     .gap_2()
-                    .pt_2()
+                    .px_4()
+                    .py_3()
                     .border_t_1()
                     .border_color(c.border)
-                    .child(
-                        Button::new("rescan-all")
-                            .outline()
-                            .small()
-                            .w_full()
-                            .icon(icon("refresh"))
-                            .label("Rescan all")
-                            .on_click(cx.listener(|this, _, _, cx| this.rescan_all(cx))),
-                    )
-                    .child(
-                        Switch::new("auto-refresh")
-                            .small()
-                            .checked(self.prefs.auto_refresh)
-                            .label("Auto-refresh folders")
-                            .on_click(
-                                cx.listener(|this, on: &bool, _, cx| {
-                                    this.set_auto_refresh(*on, cx)
-                                }),
-                            ),
-                    )
-                    .child(
-                        Switch::new("vim-keys")
-                            .small()
-                            .checked(self.prefs.vim_keys)
-                            .label("Vim keys in editor")
-                            .on_click(
-                                cx.listener(|this, on: &bool, _, cx| this.set_vim_keys(*on, cx)),
-                            ),
-                    )
+                    .child(setting(
+                        "Auto-refresh folders",
+                        toggle("auto-refresh", watching, c).on_click(cx.listener(
+                            |this, _, _, cx| this.set_auto_refresh(!this.prefs.auto_refresh, cx),
+                        )),
+                    ))
+                    .child(setting(
+                        "Vim keys in editor",
+                        toggle("vim-keys", self.prefs.vim_keys, c).on_click(cx.listener(
+                            |this, _, _, cx| this.set_vim_keys(!this.prefs.vim_keys, cx),
+                        )),
+                    ))
                     .child(
                         div()
-                            .font_family(mono)
-                            .text_size(px(10.))
-                            .text_color(c.muted_fg)
-                            .child(format!(
-                                "checked {}",
-                                self.last_check.as_deref().unwrap_or("never")
-                            )),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .pt_1()
+                            .child(div().size_2().bg(status_color(
+                                if watching {
+                                    Status::Done
+                                } else {
+                                    Status::Backlog
+                                },
+                                c.dark,
+                            )))
+                            .child(
+                                div()
+                                    .font_family(mono)
+                                    .text_size(px(10.))
+                                    .text_color(c.muted_fg)
+                                    .child(format!(
+                                        "{} · CHECKED {}",
+                                        if watching { "WATCHING" } else { "NOT WATCHING" },
+                                        self.last_check.as_deref().unwrap_or("NEVER")
+                                    )),
+                            ),
                     ),
             )
     }

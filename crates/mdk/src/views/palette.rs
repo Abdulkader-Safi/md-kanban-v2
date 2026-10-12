@@ -1,45 +1,15 @@
 //! The command palette and the settings dialog.
 
-use super::Colors;
+use super::{Colors, dialog, dialog_footer, dialog_header, icon_button, kbd, toggle};
 use crate::app::Mdk;
 use crate::board::PaletteItem;
 use crate::prefs::ThemeChoice;
+use crate::theme::icon;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, MoveDown, MoveUp};
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-
-/// A centred dialog over a dark backdrop. A click on the backdrop runs `close`.
-fn dialog(
-    id: &'static str,
-    width: f32,
-    c: Colors,
-    close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> (Stateful<Div>, Stateful<Div>) {
-    let backdrop = div()
-        .id(SharedString::from(format!("{id}-backdrop")))
-        .absolute()
-        .inset_0()
-        .flex()
-        .justify_center()
-        .bg(black().opacity(0.4))
-        .on_click(close);
-    let panel = div()
-        .id(id)
-        .occlude()
-        .w(px(width))
-        .max_w_full()
-        .flex()
-        .flex_col()
-        .bg(c.bg)
-        .border_1()
-        .border_color(c.border)
-        .shadow_lg()
-        .on_click(|_, _, cx| cx.stop_propagation());
-    (backdrop, panel)
-}
 
 impl Mdk {
     pub(super) fn palette_view(
@@ -67,31 +37,52 @@ impl Mdk {
                 ),
                 PaletteItem::Command(command) => (command.label().to_string(), "command".into()),
             };
+            let icon_name = match item {
+                PaletteItem::Card(_) => "layout-kanban",
+                PaletteItem::Create(_) => "plus",
+                PaletteItem::Move(_) => "list",
+                PaletteItem::Command(_) => "source-code",
+            };
             let item = item.clone();
+            let on = n == selected;
             div()
                 .id(("palette-item", n))
                 .flex()
                 .items_center()
-                .gap_2()
-                .px_3()
-                .py_1p5()
+                .gap_3()
+                .px_4()
+                .py_2()
+                .border_l_2()
                 .cursor_pointer()
-                .map(|d| match n == selected {
-                    true => d.bg(c.accent).text_color(c.accent_fg),
-                    false => d.hover(|s| s.bg(c.secondary)),
+                .map(|d| match on {
+                    true => d.bg(c.tint).border_color(c.primary),
+                    false => d
+                        .border_color(c.primary.opacity(0.))
+                        .hover(|s| s.bg(c.secondary)),
                 })
+                .child(icon(icon_name).size_4().text_color(match on {
+                    true => c.link,
+                    false => c.muted_fg,
+                }))
                 .child(div().flex_1().truncate().child(label))
-                .child(div().text_size(px(11.)).child(hint))
+                .child(
+                    div()
+                        .font_family(mono.clone())
+                        .text_size(px(11.))
+                        .text_color(c.muted_fg)
+                        .child(hint),
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.run_palette_item(item.clone(), window, cx)
                 }))
         });
         let rows: Vec<_> = rows.collect();
         let empty = rows.is_empty();
+        let count = rows.len();
 
         let (backdrop, panel) = dialog(
             "palette",
-            560.,
+            640.,
             c,
             cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
         );
@@ -111,37 +102,55 @@ impl Mdk {
                     }))
                     .child(
                         div()
-                            .p_2()
-                            .child(Input::new(&palette.input).appearance(false)),
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .h(px(52.))
+                            .px_4()
+                            .border_b_2()
+                            .border_color(c.primary)
+                            .child(icon("search").size_4().text_color(c.muted_fg))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Input::new(&palette.input).appearance(false)),
+                            )
+                            .child(kbd("esc", c, cx)),
                     )
                     .child(
                         div()
                             .id("palette-items")
                             .max_h(px(360.))
                             .overflow_y_scroll()
-                            .border_t_1()
-                            .border_color(c.border)
                             .children(rows)
                             .when(empty, |d| {
                                 d.child(
                                     div()
-                                        .px_3()
-                                        .py_2()
+                                        .px_4()
+                                        .py_3()
                                         .text_color(c.muted_fg)
                                         .child("No matches"),
                                 )
                             }),
                     )
                     .child(
-                        div()
-                            .px_3()
-                            .py_1p5()
-                            .border_t_1()
-                            .border_color(c.border)
-                            .font_family(mono)
-                            .text_size(px(10.))
+                        dialog_footer(c)
+                            .py_2()
+                            .text_xs()
                             .text_color(c.muted_fg)
-                            .child("↑↓ navigate · Enter run · Esc close"),
+                            .child(kbd("↑↓", c, cx))
+                            .child("move")
+                            .child(kbd("↵", c, cx))
+                            .child("run")
+                            .child(kbd("esc", c, cx))
+                            .child("close")
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .font_family(mono)
+                                    .text_size(px(10.))
+                                    .child(format!("{count} RESULTS")),
+                            ),
                     ),
             )
             .into_any_element()
@@ -163,60 +172,78 @@ impl Mdk {
             this.focus.focus(window, cx);
             cx.notify();
         };
-        let (backdrop, panel) = dialog("settings", 384., c, cx.listener(close));
+        let row = |title: &'static str, about: &'static str, control: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .gap_4()
+                .px_4()
+                .py_3p5()
+                .border_b_1()
+                .border_color(c.border)
+                .child(
+                    div()
+                        .flex_1()
+                        .child(div().font_weight(FontWeight::MEDIUM).child(title))
+                        .child(div().text_xs().text_color(c.muted_fg).child(about)),
+                )
+                .child(control)
+        };
+        let (backdrop, panel) = dialog("settings", 600., c, cx.listener(close));
         backdrop.items_center().child(
             panel
-                .gap_3()
-                .p_4()
                 .child(
-                    div()
-                        .text_base()
-                        .font_weight(FontWeight::BOLD)
-                        .child("Settings"),
+                    dialog_header("Settings", c)
+                        .child(icon_button("settings-x", "x", c).on_click(cx.listener(close))),
                 )
-                .child(super::field("Theme", c).child(super::choice(
-                    "settings-theme",
-                    themes,
-                    theme,
-                    c,
-                    cx,
-                    |this, choice, window, cx| this.set_theme(choice, window, cx),
-                )))
-                .child(
-                    Switch::new("settings-auto-refresh")
-                        .small()
-                        .checked(self.prefs.auto_refresh)
-                        .label("Auto-refresh folders")
+                .child(row(
+                    "Theme",
+                    "Dark, light, or follow the system.",
+                    super::choice(
+                        "settings-theme",
+                        themes,
+                        theme,
+                        c,
+                        cx,
+                        |this, choice, window, cx| this.set_theme(choice, window, cx),
+                    )
+                    .into_any_element(),
+                ))
+                .child(row(
+                    "Auto-refresh folders",
+                    "Reload cards when files change on disk.",
+                    toggle("settings-auto-refresh", self.prefs.auto_refresh, c)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_auto_refresh(!this.prefs.auto_refresh, cx)
+                        }))
+                        .into_any_element(),
+                ))
+                .child(row(
+                    "Vim keys in editor",
+                    "Normal, insert and visual modes in the card editor.",
+                    toggle("settings-vim", self.prefs.vim_keys, c)
                         .on_click(
-                            cx.listener(|this, on: &bool, _, cx| this.set_auto_refresh(*on, cx)),
-                        ),
-                )
+                            cx.listener(|this, _, _, cx| {
+                                this.set_vim_keys(!this.prefs.vim_keys, cx)
+                            }),
+                        )
+                        .into_any_element(),
+                ))
                 .child(
-                    Switch::new("settings-vim")
-                        .small()
-                        .checked(self.prefs.vim_keys)
-                        .label("Vim keys in editor")
-                        .on_click(cx.listener(|this, on: &bool, _, cx| this.set_vim_keys(*on, cx))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .pt_1()
+                    dialog_footer(c)
                         .child(
                             Button::new("open-config")
                                 .outline()
-                                .small()
                                 .label("Open config folder")
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.open_config_folder(cx)),
                                 ),
                         )
+                        .child(div().flex_1())
                         .child(
                             Button::new("settings-close")
-                                .ghost()
-                                .small()
-                                .label("Close")
+                                .primary()
+                                .label("Done")
                                 .on_click(cx.listener(close)),
                         ),
                 ),

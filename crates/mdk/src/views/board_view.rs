@@ -1,9 +1,9 @@
 //! The board: five columns of card faces.
 
-use super::Colors;
+use super::{Colors, icon_button, priority_badge, status_dot};
 use crate::app::{DragCard, Mdk, today};
 use crate::board::{Card, CardKey};
-use crate::theme::{due_colors, icon, priority_colors};
+use crate::theme::{due_colors, icon, status_color};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
@@ -11,14 +11,6 @@ use gpui_kit::*;
 use mdk_format::{Date, Status, Tone, format_due};
 
 const COLUMN_WIDTH: Pixels = px(288.);
-
-fn chip(c: Colors) -> Div {
-    div()
-        .px_2()
-        .py_0p5()
-        .bg(c.secondary)
-        .font_weight(FontWeight::MEDIUM)
-}
 
 /// How a card is drawn beyond its own data.
 #[derive(Clone, Copy, Default)]
@@ -43,8 +35,7 @@ fn move_menu(key: &CardKey, current: Status, this: &Entity<Mdk>, c: Colors) -> i
         .p_1()
         .bg(c.card)
         .border_1()
-        .border_color(c.border)
-        .shadow_lg()
+        .border_color(c.strong)
         .on_mouse_down_out(move |_, _, cx| {
             close.update(cx, |this, cx| {
                 this.menu_for = None;
@@ -62,7 +53,7 @@ fn move_menu(key: &CardKey, current: Status, this: &Entity<Mdk>, c: Colors) -> i
                 .py_1p5()
                 .text_xs()
                 .text_color(c.fg)
-                .child(div().size_2().rounded_full().bg(rgb(status.color())))
+                .child(status_dot(status, c))
                 .child(status.name())
                 .map(|d| match status == current {
                     true => d.opacity(0.4),
@@ -77,17 +68,18 @@ fn move_menu(key: &CardKey, current: Status, this: &Entity<Mdk>, c: Colors) -> i
         }))
 }
 
-/// The face of one card, as Electron's `TaskCard.vue` lays it out.
+/// The face of one card: priority and file name, title, excerpt, labels, then a footer
+/// with the due date, subtasks, work folder and assignee.
 fn card_face(
     card: &Card,
     state: CardState,
     this: &Entity<Mdk>,
     today: Date,
+    badge: Div,
     mono: SharedString,
     c: Colors,
 ) -> Stateful<Div> {
     let data = &card.data;
-    let (priority_fg, priority_bg) = priority_colors(data.priority, c.dark);
     let (red, amber) = due_colors(c.dark);
     // CSS collapses line breaks in the excerpt. Do the same.
     let excerpt = card
@@ -97,17 +89,23 @@ fn card_face(
         .join(" ");
     let due = data.due_date.as_ref().map(|due| {
         let (label, tone) = format_due(due, today);
-        let chip = match tone {
-            Tone::Red => chip(c).bg(rgb(red).opacity(0.15)).text_color(rgb(red)),
-            Tone::Amber => chip(c).bg(rgb(amber).opacity(0.15)).text_color(rgb(amber)),
-            Tone::Muted => chip(c).text_color(c.fg),
-        };
-        chip.child(format!("{label} · {due}"))
+        div()
+            .text_color(match tone {
+                Tone::Red => rgb(red).into(),
+                Tone::Amber => rgb(amber).into(),
+                Tone::Muted => c.muted_fg,
+            })
+            .child(format!("{label} · {due}").to_uppercase())
     });
     let (done, total) = card.subtasks;
-    let has_chips =
+    let has_footer =
         !data.assignee.is_empty() || due.is_some() || !card.workspace.is_empty() || total > 0;
     let extra_labels = data.labels.len().saturating_sub(3);
+    let initial = data
+        .assignee
+        .chars()
+        .next()
+        .map(|ch| ch.to_uppercase().to_string());
 
     div()
         .id(SharedString::from(format!(
@@ -116,31 +114,25 @@ fn card_face(
         )))
         .flex()
         .flex_col()
+        .gap_2()
         .p_3()
         .border_1()
-        .border_color(c.border)
         .bg(c.card)
-        .shadow_sm()
         .cursor_pointer()
         .map(|d| match state.focused || state.grabbed {
             // The focus ring.
             true => d.border_color(c.link),
-            false => d.hover(|s| s.border_color(c.primary.opacity(0.6))),
+            false => d
+                .border_color(c.border)
+                .hover(|s| s.border_color(c.strong).bg(c.secondary)),
         })
         .when(state.dragging, |d| d.opacity(0.4))
         .child(
             div()
                 .flex()
-                .items_start()
+                .items_center()
                 .gap_2()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .line_height(px(20.))
-                        .child(data.title.clone()),
-                )
+                .child(badge)
                 .when_some(card.error().map(str::to_string), |d, error| {
                     d.child(
                         div()
@@ -154,13 +146,14 @@ fn card_face(
                 })
                 .child(
                     div()
-                        .px_2()
-                        .py_0p5()
-                        .text_size(px(11.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .bg(priority_bg)
-                        .text_color(priority_fg)
-                        .child(data.priority.as_str()),
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_right()
+                        .font_family(mono.clone())
+                        .text_size(px(10.))
+                        .text_color(c.muted_fg)
+                        .child(card.key.rel_path.clone()),
                 )
                 .child({
                     let (toggle, key) = (this.clone(), card.key.clone());
@@ -192,81 +185,86 @@ fn card_face(
                         })
                 }),
         )
+        .child(
+            div()
+                .text_size(px(15.))
+                .line_height(px(20.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(data.title.clone()),
+        )
         .when(!excerpt.is_empty(), |d| {
             d.child(
                 div()
-                    .mt_1()
                     .text_xs()
-                    .line_height(px(20.))
+                    .line_height(px(18.))
                     .text_color(c.muted_fg)
                     .line_clamp(2)
                     .text_ellipsis()
                     .child(excerpt),
             )
         })
-        .when(has_chips, |d| {
-            d.child(
-                div()
-                    .mt_2()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_1p5()
-                    .text_size(px(11.))
-                    .text_color(c.muted_fg)
-                    .when(!data.assignee.is_empty(), |d| {
-                        d.child(chip(c).child(format!("@{}", data.assignee)))
-                    })
-                    .children(due)
-                    .when(!card.workspace.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .px_1p5()
-                                .py_0p5()
-                                .bg(c.muted)
-                                .font_family(mono.clone())
-                                .child(card.workspace.clone()),
-                        )
-                    })
-                    .when(total > 0, |d| {
-                        d.child(chip(c).child(format!("☑ {done}/{total}")))
-                    }),
-            )
-        })
         .when(!data.labels.is_empty(), |d| {
             d.child(
                 div()
-                    .mt_2()
                     .flex()
                     .flex_wrap()
                     .items_center()
                     .gap_1()
+                    .font_family(mono.clone())
                     .text_size(px(11.))
                     .text_color(c.muted_fg)
-                    .children(data.labels.iter().take(3).map(|label| {
-                        div()
-                            .px_1p5()
-                            .border_1()
-                            .border_color(c.border)
-                            .child(format!("#{label}"))
-                    }))
-                    .when(extra_labels > 0, |d| {
-                        d.child(format!("+{extra_labels} more"))
+                    .children(
+                        data.labels
+                            .iter()
+                            .take(3)
+                            .map(|label| div().px_1p5().bg(c.secondary).child(format!("#{label}"))),
+                    )
+                    .when(extra_labels > 0, |d| d.child(format!("+{extra_labels}"))),
+            )
+        })
+        .when(has_footer, |d| {
+            d.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .pt_2()
+                    .border_t_1()
+                    .border_color(c.border)
+                    .font_family(mono.clone())
+                    .text_size(px(10.))
+                    .text_color(c.muted_fg)
+                    .children(due)
+                    .when(total > 0, |d| d.child(format!("{done}/{total}")))
+                    .when(!card.workspace.is_empty(), |d| {
+                        d.child(div().truncate().child(format!("{}/", card.workspace)))
+                    })
+                    .child(div().flex_1())
+                    .when_some(initial, |d, initial| {
+                        let name = data.assignee.clone();
+                        d.child(
+                            div()
+                                .id("card-assignee")
+                                .flex()
+                                .flex_shrink_0()
+                                .items_center()
+                                .justify_center()
+                                .size(px(18.))
+                                .bg(c.secondary)
+                                .border_1()
+                                .border_color(c.strong)
+                                .text_color(c.fg)
+                                .child(initial)
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(format!("@{name}")).build(window, cx)
+                                }),
+                        )
                     }),
             )
         })
-        .child(
-            div()
-                .mt_1p5()
-                .font_family(mono)
-                .text_size(px(10.))
-                .text_color(c.muted_fg)
-                .child(card.key.rel_path.clone()),
-        )
         .when(state.grabbed, |d| {
             d.child(
                 div()
-                    .mt_2()
                     .text_size(px(11.))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(c.link)
@@ -280,8 +278,8 @@ fn drop_slot(c: Colors) -> Div {
     div()
         .absolute()
         .top(px(-5.))
-        .left_2()
-        .right_2()
+        .left_2p5()
+        .right_2p5()
         .h(px(2.))
         .bg(c.link)
 }
@@ -299,8 +297,8 @@ impl Mdk {
             .flex()
             .flex_1()
             .min_h_0()
-            .gap_3()
-            .pb_2()
+            .gap_2()
+            .p_4()
             .overflow_x_scroll()
             .track_scroll(&self.board_scroll)
             .on_drag_move(
@@ -324,7 +322,9 @@ impl Mdk {
         let today = today();
 
         // One row per card, then a last row holding "+ Add card".
+        let card_mono = mono.clone();
         let cards = list(self.lists[i].clone(), move |row, _, cx| {
+            let mono = card_mono.clone();
             let view = this.read(cx);
             let slot = view.slot == Some((i, row));
             let Some((key, _)) = view.columns[i].get(row) else {
@@ -332,7 +332,7 @@ impl Mdk {
                 return div()
                     .id(("add-card", i))
                     .relative()
-                    .px_2()
+                    .px_2p5()
                     .pb_3()
                     .when(slot, |d| d.child(drop_slot(c)))
                     .child(
@@ -362,6 +362,7 @@ impl Mdk {
                 dragging: view.dragging.as_ref() == Some(key),
                 menu_open: view.menu_for.as_ref() == Some(key),
             };
+            let badge = priority_badge(card.data.priority, c, cx);
             let drag = DragCard {
                 key: key.clone(),
                 title: card.data.title.clone().into(),
@@ -370,11 +371,11 @@ impl Mdk {
             let dragged = key.clone();
             div()
                 .relative()
-                .px_2()
+                .px_2p5()
                 .pb_2()
                 .when(slot, |d| d.child(drop_slot(c)))
                 .child(
-                    card_face(card, state, &this, today, mono.clone(), c)
+                    card_face(card, state, &this, today, badge, mono.clone(), c)
                         .on_click(move |_, window, cx| {
                             open.update(cx, |this, cx| this.open(key.clone(), window, cx))
                         })
@@ -399,8 +400,8 @@ impl Mdk {
             .h_full()
             .border_1()
             .border_color(c.border)
-            .bg(c.muted.opacity(0.4))
-            .drag_over::<DragCard>(move |style, _, _, _| style.bg(c.primary.opacity(0.15)))
+            .bg(c.muted)
+            .drag_over::<DragCard>(move |style, _, _, _| style.bg(c.tint))
             .on_drag_move(
                 cx.listener(move |this, ev: &DragMoveEvent<DragCard>, _, cx| {
                     this.drag_move(i, ev, cx)
@@ -410,22 +411,29 @@ impl Mdk {
             .child(
                 div()
                     .flex()
+                    .flex_shrink_0()
                     .items_center()
                     .gap_2()
-                    .px_3()
-                    .pt_3()
-                    .pb_2()
-                    .child(div().size_2p5().rounded_full().bg(rgb(status.color())))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(status.name()))
-                    .child(div().flex_1())
+                    .pl_3()
+                    .pr_1p5()
+                    .h(px(40.))
+                    .border_t_2()
+                    .border_color(status_color(status, c.dark))
+                    .child(status_dot(status, c))
                     .child(
                         div()
-                            .px_2()
-                            .bg(c.secondary)
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(status.name().to_uppercase()),
+                    )
+                    .child(
+                        div()
+                            .font_family(mono.clone())
+                            .text_size(px(11.))
+                            .text_color(c.muted_fg)
                             .child(count.to_string()),
                     )
+                    .child(div().flex_1())
                     .when(archivable, |d| {
                         d.child(
                             div()
@@ -441,18 +449,9 @@ impl Mdk {
                         )
                     })
                     .child(
-                        div()
-                            .id(("column-add", i))
-                            .px_1p5()
-                            .text_lg()
-                            .line_height(px(18.))
-                            .text_color(c.muted_fg)
-                            .cursor_pointer()
-                            .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
-                            .child("+")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_new_card(status, window, cx)
-                            })),
+                        icon_button(("column-add", i), "plus", c).on_click(cx.listener(
+                            move |this, _, window, cx| this.open_new_card(status, window, cx),
+                        )),
                     ),
             )
             .child(cards.flex_1().min_h_0())

@@ -2,6 +2,21 @@
 
 Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 
+
+## Redesign from Figma (2026-10-12)
+
+The app now follows the Figma file `uuKuQLmZPhiDZnq0gpoDcZ` (pages Cover, Foundation, Design). Same features and flow, new look.
+
+- Theme: near-black surfaces, one lime accent (`#c8f031`), a warm paper light theme. All colours are in `crates/mdk/assets/theme/mdk.json`. Status and priority colours are in `crates/mdk/src/theme.rs`.
+- Fonts: Schibsted Grotesk for UI text and JetBrains Mono for paths, counts and the editor. Both are OFL 1.1 and bundled. Geist is gone. This departs from the build spec, which names Geist and a system monospace.
+- Layout: the sidebar runs the full height and holds the brand. A top bar over the board holds the path, search, the Board or List switch, rescan, theme and New card. The filter bar keeps priority, due, assignee, labels and saved views.
+- Cards: outlined priority badge and file name on top, then title, excerpt, labels, and a footer with due date, subtasks, work folder and the assignee's initial.
+- Editor: icon buttons in the header (copy AI prompt, expand, delete, close), field rows with mono captions, underlined tabs, a Vim switch next to the tabs, and a mode chip in the status line.
+- Dialogs share one shell in `views/mod.rs`: header, body, sunken footer.
+- The focus ring uses the accent text colour, which is dark green in the light theme, so it keeps 3:1 on white.
+
+Not done: no screenshot check of the new UI. The screen was locked, so window capture failed. The 142 tests pass, including the contrast test and the headless render tests.
+
 ## Status
 
 - M0 de-risk: spikes done. Open items settled by best practice on Safi's say-so (see decisions)

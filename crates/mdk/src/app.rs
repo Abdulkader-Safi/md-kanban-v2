@@ -384,10 +384,8 @@ impl Mdk {
         })
         .detach();
 
-        let search = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Search title, body, id, assignee, label...")
-        });
-        let assignee_filter = cx.new(|cx| InputState::new(window, cx).placeholder("assignee"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
+        let assignee_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Assignee"));
         let on_filter_typed = |this: &mut Mdk,
                                _: &Entity<InputState>,
                                event: &InputEvent,

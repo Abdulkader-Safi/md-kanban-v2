@@ -21,6 +21,7 @@ use crate::board::Command;
 use crate::prefs::ViewChoice;
 use crate::theme::icon;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::Input;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -36,9 +37,18 @@ pub(crate) struct Colors {
     pub muted_fg: Hsla,
     pub secondary: Hsla,
     pub card: Hsla,
+    /// The lime fill of the main action.
     pub primary: Hsla,
-    /// Teal that reads as text on the background.
+    /// Text on the lime fill.
+    pub on_primary: Hsla,
+    /// The accent as text and as focus ring: lime on dark, dark green on light.
     pub link: Hsla,
+    /// A faint accent fill for the chosen chip or row.
+    pub tint: Hsla,
+    /// The border of dialogs and outline buttons.
+    pub strong: Hsla,
+    /// The backdrop behind a sheet or dialog.
+    pub scrim: Hsla,
     pub sidebar: Hsla,
     pub accent: Hsla,
     pub accent_fg: Hsla,
@@ -59,7 +69,14 @@ impl Colors {
             secondary: t.secondary,
             card: t.popover,
             primary: t.primary,
+            on_primary: t.primary_foreground,
             link: t.link,
+            tint: t.link.opacity(if t.is_dark() { 0.14 } else { 0.12 }),
+            strong: rgb(if t.is_dark() { 0x3a3a41 } else { 0xb9b7ae }).into(),
+            scrim: match t.is_dark() {
+                true => black().opacity(0.6),
+                false => black().opacity(0.35),
+            },
             sidebar: t.sidebar,
             accent: t.sidebar_accent,
             accent_fg: t.sidebar_accent_foreground,
@@ -133,14 +150,21 @@ impl Render for Mdk {
             .when_some(self.menu_bar.clone(), |d, menu_bar| {
                 d.child(div().border_b_1().border_color(c.border).child(menu_bar))
             })
-            .child(self.header(narrow, c, cx))
             .child(
                 div()
                     .flex()
                     .flex_1()
                     .min_h_0()
                     .when(!narrow, |d| d.child(self.sidebar(c, cx)))
-                    .child(self.main(c, cx)),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.top_bar(narrow, c, cx))
+                            .child(self.main(c, cx)),
+                    ),
             )
             .when(narrow && self.show_sidebar, |d| {
                 d.child(
@@ -149,7 +173,7 @@ impl Render for Mdk {
                         .absolute()
                         .inset_0()
                         .flex()
-                        .bg(black().opacity(0.3))
+                        .bg(c.scrim)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.show_sidebar = false;
                             cx.notify();
@@ -172,37 +196,31 @@ impl Render for Mdk {
             })
             .when_some(self.toast.as_ref(), |d, toast| {
                 d.child(
-                    div()
-                        .absolute()
-                        .bottom_4()
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .id("toast")
-                                .occlude()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .px_4()
-                                .py_2()
-                                .bg(c.card)
-                                .border_1()
-                                .border_color(c.border)
-                                .shadow_lg()
-                                .child(toast.text.clone())
-                                .when(toast.undo, |d| {
-                                    d.child(
-                                        Button::new("toast-undo")
-                                            .outline()
-                                            .small()
-                                            .label("Undo")
-                                            .on_click(cx.listener(|this, _, _, cx| this.undo(cx))),
-                                    )
-                                }),
-                        ),
+                    div().absolute().bottom_6().right_6().child(
+                        div()
+                            .id("toast")
+                            .occlude()
+                            .flex()
+                            .items_center()
+                            .gap_4()
+                            .min_w(px(320.))
+                            .pl_4()
+                            .pr_2()
+                            .py_2()
+                            .bg(c.secondary)
+                            .border_l_2()
+                            .border_color(c.primary)
+                            .child(div().flex_1().child(toast.text.clone()))
+                            .when(toast.undo, |d| {
+                                d.child(
+                                    Button::new("toast-undo")
+                                        .ghost()
+                                        .small()
+                                        .label("Undo")
+                                        .on_click(cx.listener(|this, _, _, cx| this.undo(cx))),
+                                )
+                            }),
+                    ),
                 )
             })
     }
@@ -216,103 +234,154 @@ impl Render for DragCard {
             .p_3()
             .bg(c.card)
             .border_1()
-            .border_color(c.primary)
-            .shadow_lg()
+            .border_color(c.link)
             .text_color(c.fg)
-            .text_sm()
+            .text_size(px(15.))
             .font_weight(FontWeight::SEMIBOLD)
             .opacity(0.9)
             .child(self.title.clone())
     }
 }
 
+/// A path with the home folder written as `~`.
+fn tilde(path: &std::path::Path) -> String {
+    match std::env::home_dir().and_then(|home| path.strip_prefix(home).ok().map(|p| p.to_owned())) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 impl Mdk {
-    fn header(&self, narrow: bool, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// The bar above the board: where you are, search, the view switch and the main actions.
+    fn top_bar(&self, narrow: bool, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let has_projects = !self.board.projects.is_empty();
+        let place = match &self.board.selected_project {
+            _ if !has_projects => "No project open".to_string(),
+            None => "All projects".to_string(),
+            Some(id) => self
+                .board
+                .project(id)
+                .map_or_else(String::new, |p| tilde(&p.root)),
+        };
         let stats = format!(
-            "local markdown board · {} cards · {} projects",
+            "{} cards · {} projects",
             self.board.card_count(),
             self.board.projects.len()
         );
-        let active = self
-            .board
-            .selected_project
-            .as_ref()
-            .and_then(|id| self.board.project(id))
-            .map(|p| p.name.clone());
-        let search = if cfg!(target_os = "macos") {
-            "Search  ⌘K"
-        } else {
-            "Search  Ctrl K"
-        };
         let dark = cx.theme().is_dark();
         let mono = cx.theme().mono_font_family.clone();
+        let view = self.prefs.view;
+        let tab =
+            |id: &'static str, name: &'static str, choice: ViewChoice, cx: &mut Context<Self>| {
+                div()
+                    .id(id)
+                    .flex()
+                    .items_center()
+                    .h(px(48.))
+                    .px_3()
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .border_b_2()
+                    .cursor_pointer()
+                    .map(|d| match view == choice {
+                        true => d.border_color(c.primary),
+                        false => d
+                            .border_color(c.primary.opacity(0.))
+                            .text_color(c.muted_fg)
+                            .hover(|s| s.text_color(c.fg)),
+                    })
+                    .child(name)
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_view(choice, cx)))
+            };
 
         div()
             .flex()
+            .flex_shrink_0()
             .items_center()
-            .gap_3()
+            .gap_2()
+            .h(px(48.))
             .px_4()
-            .py_2p5()
             .border_b_1()
             .border_color(c.border)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .font_weight(FontWeight::BOLD)
-                    .child(icon("layout-kanban").size_5())
-                    .child("mdk"),
-            )
-            .child(div().text_xs().text_color(c.muted_fg).child(stats))
-            .when_some(active, |d, name| {
-                d.child(
-                    div()
-                        .px_2p5()
-                        .py_0p5()
-                        .bg(c.secondary)
-                        .font_family(mono)
-                        .text_xs()
-                        .child(name),
-                )
-            })
             .when(narrow, |d| {
                 d.child(
-                    Button::new("show-sidebar")
-                        .outline()
-                        .small()
-                        .icon(icon("folders"))
-                        .on_click(cx.listener(|this, _, _, cx| {
+                    icon_button("show-sidebar", "folders", c).on_click(cx.listener(
+                        |this, _, _, cx| {
                             this.show_sidebar = !this.show_sidebar;
                             cx.notify();
-                        })),
+                        },
+                    )),
+                )
+            })
+            .child(
+                div()
+                    .truncate()
+                    .font_family(mono.clone())
+                    .text_size(px(13.))
+                    .text_color(c.muted_fg)
+                    .child(place),
+            )
+            .when(has_projects, |d| {
+                d.child(
+                    div()
+                        .flex_shrink_0()
+                        .font_family(mono)
+                        .text_size(px(10.))
+                        .text_color(c.muted_fg)
+                        .child(stats),
                 )
             })
             .child(div().flex_1())
-            .child(
-                Button::new("search")
-                    .outline()
-                    .small()
-                    .label(search)
+            .when(has_projects, |d| {
+                d.child(
+                    div().w(px(280.)).flex_shrink(1.).min_w(px(120.)).child(
+                        Input::new(&self.search)
+                            .small()
+                            .cleanable(true)
+                            .prefix(icon("search").size_4().text_color(c.muted_fg)),
+                    ),
+                )
+                .child(
+                    kbd(
+                        if cfg!(target_os = "macos") {
+                            "⌘K"
+                        } else {
+                            "Ctrl K"
+                        },
+                        c,
+                        cx,
+                    )
+                    .id("search")
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(c.fg))
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_palette(window, cx))),
-            )
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_shrink_0()
+                        .child(tab("view-board", "Board", ViewChoice::Board, cx))
+                        .child(tab("view-list", "List", ViewChoice::List, cx)),
+                )
+                .child(
+                    icon_button("rescan-all", "refresh", c)
+                        .on_click(cx.listener(|this, _, _, cx| this.rescan_all(cx))),
+                )
+            })
             .child(
-                Button::new("theme")
-                    .ghost()
-                    .small()
-                    .icon(icon(if dark { "sun" } else { "moon" }))
+                icon_button("theme", if dark { "sun" } else { "moon" }, c)
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_theme(window, cx))),
             )
-            .child(
-                Button::new("new-card")
-                    .primary()
-                    .small()
-                    .icon(icon("plus"))
-                    .label("New card  N")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_new_card(Status::Backlog, window, cx)
-                    })),
-            )
+            .when(has_projects, |d| {
+                d.child(
+                    Button::new("new-card")
+                        .primary()
+                        .label("New card")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_new_card(Status::Backlog, window, cx)
+                        })),
+                )
+            })
     }
 
     fn main(&self, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -320,6 +389,7 @@ impl Mdk {
             self.welcome(c, cx).into_any_element()
         } else if self.board.is_loading() {
             div()
+                .m_4()
                 .border_1()
                 .border_color(c.border)
                 .p_6()
@@ -356,30 +426,26 @@ impl Mdk {
             .flex_col()
             .flex_1()
             .min_w_0()
-            .gap_3()
-            .p_3()
+            .min_h_0()
             .when_some(self.notice.clone(), |d, notice| {
                 d.child(
                     div()
                         .flex()
                         .items_center()
                         .gap_2()
-                        .border_1()
-                        .border_color(c.danger.opacity(0.4))
-                        .bg(c.danger.opacity(0.05))
-                        .px_3()
+                        .border_b_1()
+                        .border_l_2()
+                        .border_color(c.danger)
+                        .bg(c.danger.opacity(0.1))
+                        .px_4()
                         .py_2()
                         .child(div().flex_1().child(notice))
-                        .child(
-                            Button::new("dismiss-notice")
-                                .ghost()
-                                .xsmall()
-                                .icon(icon("x"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.notice = None;
-                                    cx.notify();
-                                })),
-                        ),
+                        .child(icon_button("dismiss-notice", "x", c).on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.notice = None;
+                                cx.notify();
+                            },
+                        ))),
                 )
             })
             .when(has_projects, |d| d.child(self.filter_bar(c, cx)))
@@ -388,58 +454,58 @@ impl Mdk {
 
     /// The first-run state: no project connected yet.
     fn welcome(&self, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        empty_state(c)
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Connect a folder"),
-            )
-            .child(div().max_w(px(384.)).text_color(c.muted_fg).child(
-                "Every card is a markdown file in a folder you pick, so your AI agent \
-                     moves cards by editing files.",
-            ))
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("welcome-connect")
-                            .primary()
-                            .small()
-                            .icon(icon("folder-open"))
-                            .label("Connect a folder")
-                            .on_click(cx.listener(|this, _, _, cx| this.connect_folder(cx))),
-                    )
-                    .child(
-                        Button::new("welcome-sample")
-                            .outline()
-                            .small()
-                            .label("Create sample project")
-                            .on_click(cx.listener(|this, _, _, cx| this.create_sample(cx))),
-                    ),
-            )
+        empty_state(
+            "folder-open",
+            "Open a folder of markdown files",
+            "mdk turns every .md file in the folder into a card. Your files stay where they \
+             are, in plain text, so your AI agent moves cards by editing files.",
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("welcome-connect")
+                        .primary()
+                        .label("Add project")
+                        .on_click(cx.listener(|this, _, _, cx| this.connect_folder(cx))),
+                )
+                .child(
+                    Button::new("welcome-sample")
+                        .outline()
+                        .label("Try the sample project")
+                        .on_click(cx.listener(|this, _, _, cx| this.create_sample(cx))),
+                ),
+            c,
+        )
     }
 
     fn no_cards(&self, c: Colors, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        empty_state(c)
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("No cards match"),
-            )
-            .child(div().max_w(px(384.)).text_color(c.muted_fg).child(
-                "Connect a project folder, pick a different project or work folder, or create \
-                 your first card. Cards are plain markdown files your AI agent can read and edit.",
-            ))
-            .child(
-                Button::new("first-card")
+        let filtered = self.board.filters.is_active();
+        empty_state(
+            "search",
+            "No cards match",
+            match filtered {
+                true => "Nothing here fits the filters that are on. Clear them to see every card.",
+                false => {
+                    "Pick a different project or work folder, or create your first card. \
+                          Cards are plain markdown files your AI agent can read and edit."
+                }
+            },
+            match filtered {
+                true => Button::new("clear-filters")
                     .primary()
-                    .small()
+                    .label("Clear filters")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.set_filters(Default::default(), window, cx)
+                    })),
+                false => Button::new("first-card")
+                    .primary()
                     .label("Create first card")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_new_card(Status::Backlog, window, cx)
                     })),
-            )
+            },
+            c,
+        )
     }
 
     fn confirm_dialog(
@@ -448,10 +514,11 @@ impl Mdk {
         c: Colors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let (question, yes) = match confirm {
+        let (title, message, yes) = match confirm {
             Confirm::Archive(count) => (
-                format!("Archive {count} done cards to archive/?"),
-                "Archive",
+                format!("Archive {count} done cards?"),
+                "They move to the archive/ folder.",
+                Button::new("confirm-yes").primary().label("Archive"),
             ),
             Confirm::Delete(key) => {
                 let title = self
@@ -459,86 +526,256 @@ impl Mdk {
                     .card(key)
                     .map_or("this card", |c| c.data.title.as_str());
                 (
-                    format!("Delete \"{title}\"? This removes the markdown file."),
-                    "Delete",
+                    format!("Delete \"{title}\"?"),
+                    "This removes the markdown file.",
+                    Button::new("confirm-yes").danger().label("Delete"),
                 )
             }
         };
-        div()
-            .id("confirm-backdrop")
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(black().opacity(0.4))
-            .on_click(cx.listener(|this, _, window, cx| this.answer_confirm(false, window, cx)))
-            .child(
-                div()
-                    .id("confirm")
-                    .occlude()
-                    .w(px(384.))
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .p_4()
-                    .bg(c.bg)
-                    .border_1()
-                    .border_color(c.border)
-                    .shadow_lg()
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(question)
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                Button::new("confirm-no")
-                                    .ghost()
-                                    .small()
-                                    .label("Cancel")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.answer_confirm(false, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("confirm-yes")
-                                    .primary()
-                                    .small()
-                                    .label(yes)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.answer_confirm(true, window, cx)
-                                    })),
-                            ),
-                    ),
-            )
+        let (backdrop, panel) = dialog(
+            "confirm",
+            440.,
+            c,
+            cx.listener(|this, _, window, cx| this.answer_confirm(false, window, cx)),
+        );
+        backdrop.items_center().child(
+            panel
+                .child(
+                    dialog_header(title, c).child(icon_button("confirm-x", "x", c).on_click(
+                        cx.listener(|this, _, window, cx| this.answer_confirm(false, window, cx)),
+                    )),
+                )
+                .child(div().p_4().text_color(c.muted_fg).child(message))
+                .child(
+                    dialog_footer(c)
+                        .justify_end()
+                        .child(
+                            Button::new("confirm-no")
+                                .outline()
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.answer_confirm(false, window, cx)
+                                })),
+                        )
+                        .child(yes.on_click(cx.listener(|this, _, window, cx| {
+                            this.answer_confirm(true, window, cx)
+                        }))),
+                ),
+        )
     }
 }
 
-fn empty_state(c: Colors) -> Div {
-    div()
+/// A dashed box in the middle of the main area: an icon, a title and one line of help.
+fn empty_state(
+    icon_name: &'static str,
+    title: &'static str,
+    body: &'static str,
+    actions: impl IntoElement,
+    c: Colors,
+) -> Div {
+    let inner = div()
         .flex()
         .flex_col()
-        .flex_1()
         .items_center()
-        .justify_center()
-        .gap_2()
+        .gap_4()
+        .px_12()
+        .py_10()
         .border_1()
         .border_dashed()
         .border_color(c.border)
-        .p_10()
         .text_center()
-}
-
-/// A labelled form field.
-pub(crate) fn field(label: &'static str, c: Colors) -> Div {
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size_12()
+                .bg(c.tint)
+                .border_1()
+                .border_color(c.link)
+                .child(icon(icon_name).size_6().text_color(c.link)),
+        )
+        .child(
+            div()
+                .text_size(px(28.))
+                .line_height(px(34.))
+                .font_weight(FontWeight::BOLD)
+                .child(title),
+        )
+        .child(div().max_w(px(380.)).text_color(c.muted_fg).child(body))
+        .child(actions);
     div()
         .flex()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .child(inner)
+}
+
+/// An uppercase mono caption: section headings and field names.
+pub(crate) fn label(text: &'static str, c: Colors, cx: &App) -> Div {
+    div()
+        .font_family(cx.theme().mono_font_family.clone())
+        .text_size(px(11.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(c.muted_fg)
+        .child(text)
+}
+
+/// A keyboard shortcut hint.
+pub(crate) fn kbd(text: &'static str, c: Colors, cx: &App) -> Div {
+    div()
+        .flex_shrink_0()
+        .px_1()
+        .border_1()
+        .border_color(c.strong)
+        .font_family(cx.theme().mono_font_family.clone())
+        .text_size(px(10.))
+        .text_color(c.muted_fg)
+        .child(text)
+}
+
+/// The outlined priority badge: a square in the priority's colour and its name.
+pub(crate) fn priority_badge(priority: mdk_format::Priority, c: Colors, cx: &App) -> Div {
+    let (color, _) = crate::theme::priority_colors(priority, c.dark);
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap_1p5()
+        .px_1p5()
+        .border_1()
+        .border_color(color)
+        .font_family(cx.theme().mono_font_family.clone())
+        .text_size(px(10.))
+        .text_color(color)
+        .child(div().size_1p5().bg(color))
+        .child(priority.as_str().to_uppercase())
+}
+
+/// The square marker of a column.
+pub(crate) fn status_dot(status: Status, c: Colors) -> Div {
+    div()
+        .size_2()
+        .flex_shrink_0()
+        .bg(crate::theme::status_color(status, c.dark))
+}
+
+/// A 28px square button holding one icon.
+pub(crate) fn icon_button(
+    id: impl Into<ElementId>,
+    icon_name: &'static str,
+    c: Colors,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size_7()
+        .text_color(c.muted_fg)
+        .cursor_pointer()
+        .hover(|s| s.bg(c.secondary).text_color(c.fg))
+        .child(icon(icon_name).size_4())
+}
+
+/// A square on/off switch. Add the click handler at the call site.
+pub(crate) fn toggle(id: impl Into<ElementId>, on: bool, c: Colors) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .w(px(34.))
+        .h(px(18.))
+        .px(px(3.))
+        .border_1()
+        .cursor_pointer()
+        .map(|d| match on {
+            true => d.justify_end().bg(c.primary).border_color(c.primary),
+            false => d.border_color(c.strong),
+        })
+        .child(
+            div()
+                .size_3()
+                .bg(if on { c.on_primary } else { c.muted_fg }),
+        )
+}
+
+/// A dialog over the scrim. A click on the scrim runs `close`. Returns (scrim, panel).
+pub(crate) fn dialog(
+    id: &'static str,
+    width: f32,
+    c: Colors,
+    close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> (Stateful<Div>, Stateful<Div>) {
+    let backdrop = div()
+        .id(SharedString::from(format!("{id}-backdrop")))
+        .absolute()
+        .inset_0()
+        .flex()
+        .justify_center()
+        .bg(c.scrim)
+        .on_click(close);
+    let panel = div()
+        .id(id)
+        .occlude()
+        .w(px(width))
+        .max_w_full()
+        .flex()
         .flex_col()
-        .gap_1()
-        .text_xs()
-        .child(div().text_color(c.muted_fg).child(label))
+        .bg(c.card)
+        .border_1()
+        .border_color(c.strong)
+        .on_click(|_, _, cx| cx.stop_propagation());
+    (backdrop, panel)
+}
+
+/// The title row of a dialog. Add the close button as a child.
+pub(crate) fn dialog_header(title: impl Into<SharedString>, c: Colors) -> Div {
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap_2()
+        .h(px(48.))
+        .pl_4()
+        .pr_2()
+        .border_b_1()
+        .border_color(c.border)
+        .child(
+            div()
+                .flex_1()
+                .truncate()
+                .text_size(px(15.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title.into()),
+        )
+}
+
+/// The sunken button row at the bottom of a dialog.
+pub(crate) fn dialog_footer(c: Colors) -> Div {
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .py_3()
+        .bg(c.muted)
+        .border_t_1()
+        .border_color(c.border)
+}
+
+/// A form row: the field name on the left, the control on the right.
+pub(crate) fn field(name: &'static str, c: Colors, cx: &App) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_4()
+        .min_h_8()
+        .child(label(name, c, cx).w(px(96.)).flex_shrink_0())
 }
 
 /// A row of square chips where one is chosen. `pick` runs with the chip that was clicked.
@@ -555,20 +792,28 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
         .flex_wrap()
         .gap_1()
         .children(options.into_iter().enumerate().map(|(n, (value, name))| {
-            div()
-                .id((id, n))
-                .px_2()
-                .py_1()
-                .border_1()
-                .cursor_pointer()
-                .map(|d| match value == current {
-                    true => d
-                        .bg(c.accent)
-                        .text_color(c.accent_fg)
-                        .border_color(c.accent),
-                    false => d.border_color(c.border).hover(|s| s.bg(c.secondary)),
-                })
+            chip((id, n), value == current, c)
                 .child(name)
                 .on_click(cx.listener(move |this, _, window, cx| pick(this, value, window, cx)))
         }))
+}
+
+/// A square chip. A chosen chip takes the accent tint.
+pub(crate) fn chip(id: impl Into<ElementId>, on: bool, c: Colors) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .px_2()
+        .py_1()
+        .border_1()
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .map(|d| match on {
+            true => d.bg(c.tint).border_color(c.link).text_color(c.link),
+            false => d
+                .border_color(c.border)
+                .text_color(c.muted_fg)
+                .hover(|s| s.bg(c.secondary).text_color(c.fg)),
+        })
 }
