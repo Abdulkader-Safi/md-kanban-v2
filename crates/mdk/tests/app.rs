@@ -234,7 +234,6 @@ fn opening_a_card_shows_the_sheet_and_escape_closes_it(cx: &mut TestAppContext) 
     cx.update(|cx| assert_eq!(f.view.read(cx).open_card, None));
 }
 
-#[cfg(unix)]
 #[test]
 fn a_second_launch_signals_the_first_and_steps_aside() {
     use futures::StreamExt;
@@ -245,10 +244,27 @@ fn a_second_launch_signals_the_first_and_steps_aside() {
         "the second launch must exit"
     );
     assert_eq!(futures::executor::block_on(first.next()), Some(()));
-    // After the first one is gone, its socket file is stale and a new launch takes over.
-    drop(first);
-    std::fs::remove_file(dir.path().join("mdk.sock")).unwrap();
-    assert!(mdk::app::single_instance(dir.path()).is_some());
+    // Another config folder is another mdk, and runs alongside.
+    let other = tempfile::tempdir().unwrap();
+    assert!(mdk::app::single_instance(other.path()).is_some());
+}
+
+/// A socket file left by a crash does not stop mdk from starting.
+#[cfg(unix)]
+#[test]
+fn a_stale_socket_file_is_taken_over() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(std::os::unix::net::UnixListener::bind(dir.path().join("mdk.sock")).unwrap());
+    assert!(
+        dir.path().join("mdk.sock").exists(),
+        "the dead socket's file is still there"
+    );
+    let first = mdk::app::single_instance(dir.path());
+    assert!(first.is_some());
+    assert!(
+        mdk::app::single_instance(dir.path()).is_none(),
+        "and it now answers"
+    );
 }
 
 // ---- M3: moving and creating, through the real window ---------------------------------------
@@ -806,4 +822,47 @@ fn the_sample_project_fills_all_five_columns(cx: &mut TestAppContext) {
     settle(cx, &f);
     assert_eq!(fs::read_to_string(&edited).unwrap(), "# Mine now\n");
     cx.update(|cx| assert_eq!(f.view.read(cx).board.projects.len(), 1));
+}
+
+#[gpui_kit::test]
+fn the_auto_refresh_switch_pauses_and_resumes_live_updates(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = open(cx, true, connected);
+    cx.update(|cx| {
+        f.view
+            .update(cx, |view, cx| view.set_auto_refresh(false, cx))
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    put(
+        f.project.path(),
+        "backend/login.md",
+        &card("Fix login", "done", 1),
+    );
+    // Well past the watcher's debounce: the board must not have moved.
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(40));
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        column(cx, &f, Status::Todo),
+        ["Fix login", "Fix logout"],
+        "updates are paused"
+    );
+
+    // Switching it back on catches up with what changed meanwhile.
+    cx.update(|cx| {
+        f.view
+            .update(cx, |view, cx| view.set_auto_refresh(true, cx))
+    });
+    let mut waited = Duration::ZERO;
+    while column(cx, &f, Status::Done).is_empty() {
+        assert!(waited < Duration::from_secs(5), "the board never caught up");
+        std::thread::sleep(Duration::from_millis(25));
+        waited += Duration::from_millis(25);
+        cx.run_until_parked();
+    }
+    with_view(cx, &f, |view, _, _| view.save_now());
+    assert!(Prefs::load(f.config.path()).0.auto_refresh);
+    cx.update(|cx| f.view.update(cx, |view, _| view.stop_watching()));
+    std::thread::sleep(Duration::from_millis(300));
 }

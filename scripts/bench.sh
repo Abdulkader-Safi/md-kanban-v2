@@ -4,6 +4,7 @@
 # compare. macOS only.
 #
 #   scripts/bench.sh dist/mdk.app                    # after: cargo packager --release -c Packager.toml --formats app
+#   RUNS=5 scripts/bench.sh dist/mdk.app             # more launches for the cold start median
 #   scripts/bench.sh "/Applications/MD Kanban.app"
 #   IDLE_SECONDS=600 scripts/bench.sh dist/mdk.app   # the 10-minute idle reading NFR-01 asks for
 #
@@ -54,22 +55,36 @@ hdiutil create -quiet -volname bench -srcfolder "$app" -format UDZO "$dmg"
 echo "compressed dmg: $(du -h "$dmg" | cut -f1)"
 rm -f "$dmg"
 
-# Cold start: from launch until the process has a window on screen.
-name="$(basename "$binary")"
-start=$(python3 -c 'import time; print(time.time())')
-"$binary" >/dev/null 2>&1 &
-pid=$!
-window=""
-for _ in $(seq 1 200); do
-  window=$(osascript -e "tell application \"System Events\" to count windows of (first process whose unix id is $pid)" 2>/dev/null || true)
-  [ "${window:-0}" -ge 1 ] 2>/dev/null && break
-  sleep 0.05
+# Cold start: from launch until the process has a window on screen. Median of RUNS launches.
+here="$(cd "$(dirname "$0")" && pwd)"
+counter="$(mktemp -d)/window-count"
+swiftc -O "$here/window-count.swift" -o "$counter" 2>/dev/null
+runs="${RUNS:-3}"
+times=()
+for run in $(seq 1 "$runs"); do
+  pkill -f "$app/Contents" 2>/dev/null || true
+  sleep 1
+  start=$(python3 -c 'import time; print(time.time())')
+  "$binary" >/dev/null 2>&1 &
+  pid=$!
+  disown "$pid"
+  seen=0
+  for _ in $(seq 1 400); do
+    if [ "$("$counter" "$pid")" -ge 1 ]; then seen=1; break; fi
+    sleep 0.01
+  done
+  end=$(python3 -c 'import time; print(time.time())')
+  if [ "$seen" = 1 ]; then
+    times+=("$(python3 -c "print(round(($end - $start) * 1000))")")
+  fi
+  # Keep the last launch running for the idle reading.
+  [ "$run" -lt "$runs" ] && { kill "$pid" 2>/dev/null || true; }
 done
-end=$(python3 -c 'import time; print(time.time())')
-if [ "${window:-0}" -ge 1 ] 2>/dev/null; then
-  python3 -c "print(f'cold start:     {($end - $start) * 1000:.0f} ms to first window')"
+if [ "${#times[@]}" -gt 0 ]; then
+  median=$(printf '%s\n' "${times[@]}" | sort -n | sed -n "$(( (${#times[@]} + 1) / 2 ))p")
+  echo "cold start:     ${median} ms to first window (median of ${#times[@]}: ${times[*]})"
 else
-  echo "cold start:     no window seen (is the screen locked, or is System Events not allowed?)"
+  echo "cold start:     no window seen (is the screen locked?)"
 fi
 
 echo "idle for ${idle}s..."
@@ -79,4 +94,3 @@ rss=$(ps -axo rss=,command= | awk -v app="$app" 'index($0, app) { sum += $1 } EN
 echo "idle memory:    ${rss} MB after ${idle}s (all of the app's processes)"
 kill "$pid" 2>/dev/null || true
 pkill -f "$app/Contents" 2>/dev/null || true
-echo "$name done"

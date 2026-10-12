@@ -145,23 +145,48 @@ pub fn window_options(prefs: &Prefs, cx: &App) -> WindowOptions {
 /// The other end of the single-instance signal: yields once each time mdk is launched again.
 pub type Instance = UnboundedReceiver<()>;
 
-/// Make this the one running mdk. Returns `None` when another mdk already runs: it has then
-/// been asked to show its window, and this process should exit.
-// ponytail: a Unix socket in the config folder. Windows has no check yet and can open twice;
-// a named pipe goes in with the Windows packaging work (M8).
-pub fn single_instance(config_dir: &Path) -> Option<Instance> {
-    let (tx, rx) = unbounded();
+/// The local socket that marks a running mdk for one config folder: a socket file in the
+/// folder on macOS and Linux, a named pipe on Windows.
+fn instance_name(config_dir: &Path) -> std::io::Result<interprocess::local_socket::Name<'static>> {
+    use interprocess::local_socket::prelude::*;
     #[cfg(unix)]
     {
-        use std::os::unix::net::{UnixListener, UnixStream};
-        let _ = std::fs::create_dir_all(config_dir);
-        let socket = config_dir.join("mdk.sock");
-        if UnixStream::connect(&socket).is_ok() {
-            return None;
-        }
-        // Nobody answered, so a socket file here is left over from a crash.
-        let _ = std::fs::remove_file(&socket);
-        if let Ok(listener) = UnixListener::bind(&socket) {
+        use interprocess::local_socket::GenericFilePath;
+        config_dir.join("mdk.sock").to_fs_name::<GenericFilePath>()
+    }
+    #[cfg(not(unix))]
+    {
+        use interprocess::local_socket::GenericNamespaced;
+        use std::hash::{Hash, Hasher};
+        // Pipe names are global, so the folder is part of the name.
+        let mut hasher = std::hash::DefaultHasher::new();
+        config_dir.hash(&mut hasher);
+        format!("mdk-{:016x}", hasher.finish()).to_ns_name::<GenericNamespaced>()
+    }
+}
+
+/// Make this the one running mdk. Returns `None` when another mdk already runs: it has then
+/// been asked to show its window, and this process should exit.
+pub fn single_instance(config_dir: &Path) -> Option<Instance> {
+    use interprocess::local_socket::prelude::*;
+    use interprocess::local_socket::{ListenerOptions, Stream};
+
+    let (tx, rx) = unbounded();
+    let _ = std::fs::create_dir_all(config_dir);
+    let name = |_: ()| instance_name(config_dir).ok();
+    if name(()).is_some_and(|name| Stream::connect(name).is_ok()) {
+        return None;
+    }
+    // Nobody answered, so a socket file left here is from a crash. Take it over.
+    let listener = name(()).and_then(|name| {
+        ListenerOptions::new()
+            .name(name)
+            .try_overwrite(true)
+            .create_sync()
+            .ok()
+    });
+    match listener {
+        Some(listener) => {
             std::thread::spawn(move || {
                 for _ in listener.incoming() {
                     if tx.unbounded_send(()).is_err() {
@@ -170,11 +195,8 @@ pub fn single_instance(config_dir: &Path) -> Option<Instance> {
                 }
             });
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = config_dir;
-        std::mem::forget(tx);
+        // Without the socket mdk still runs. It just cannot notice a second launch.
+        None => std::mem::forget(tx),
     }
     Some(rx)
 }
@@ -351,6 +373,8 @@ impl Mdk {
         cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.check_folders(cx);
+                // The OS "reduce motion" setting may have changed while mdk was in the back.
+                gpui_kit::base::apply_system_reduce_motion(cx);
             }
         })
         .detach();
