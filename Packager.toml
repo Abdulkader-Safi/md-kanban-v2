@@ -24,6 +24,8 @@ resources = ["AGENTS.md", "LICENSE", "THIRD_PARTY_LICENSES.html"]
 
 [macos]
 minimum-system-version = "13.0"
+# Ad-hoc signature. Not notarised, so a downloaded copy still needs "Open Anyway" once.
+signing-identity = "-"
 
 [nsis]
 # Per-user install: no administrator rights needed.

@@ -132,11 +132,22 @@ cargo about generate -m crates/mdk/Cargo.toml about.hbs -o THIRD_PARTY_LICENSES.
 cargo packager --release -c Packager.toml
 ```
 
+To install your own build on a Mac, copy it into Applications and open it from there or from Spotlight:
+
+```sh
+cargo packager --release -c Packager.toml --formats app
+ditto dist/mdk.app /Applications/mdk.app
+```
+
 This makes a `.app` and `.dmg` on macOS, an NSIS installer on Windows and an AppImage on Linux, in `dist/`. Pushing a `v*` tag runs the same steps on all three in GitHub Actions and attaches the results to a GitHub release.
 
-Builds are unsigned. When you open one:
+To publish a release, bump `version` in `Cargo.toml` and `Packager.toml`, commit, then `git tag v0.1.0 && git push origin v0.1.0`.
 
-- macOS says the app is from an unidentified developer. Right-click the app, choose Open, then Open again. You only do this once.
+The app icon comes from `crates/mdk/assets/app/app-icon.svg`. After editing it, run `scripts/app-icon.sh` to rebuild the `.icns`, `.ico` and `.png`.
+
+Builds are not notarised (the macOS app has an ad-hoc signature). When you open one:
+
+- macOS blocks the first launch. Open System Settings, Privacy & Security, scroll down and click "Open Anyway" next to mdk. Or run `xattr -dr com.apple.quarantine /Applications/mdk.app` once.
 - Windows SmartScreen says it protected your PC. Click "More info", then "Run anyway".
 - Linux: `chmod +x mdk_*.AppImage`, then run it.
 

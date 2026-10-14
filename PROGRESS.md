@@ -3,6 +3,13 @@
 Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 
 
+## App icon and releases (2026-10-14)
+
+- The app icon is the sidebar's kanban mark in lime on an ink rounded tile. `scripts/app-icon.sh` rebuilds the `.icns`, `.ico` and `.png` from `app-icon.svg`.
+- The macOS bundle id is `com.abdulkadersafi.mdk`. The bundle gets an ad-hoc signature (`signing-identity = "-"`), so a downloaded copy shows "Open Anyway" in Privacy & Security instead of "damaged". Real signing and notarisation need a paid Apple Developer account.
+- The release build is arm64 only, because `macos-14` runners are Apple Silicon. Add an Intel or universal build if someone asks for one.
+- Releases: push a `v*` tag and `release.yml` attaches the dmg, the Windows installer and the AppImage.
+
 ## Redesign from Figma (2026-10-12)
 
 The app now follows the Figma file `uuKuQLmZPhiDZnq0gpoDcZ` (pages Cover, Foundation, Design). Same features and flow, new look.
