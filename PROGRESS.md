@@ -3,6 +3,12 @@
 Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 
 
+## Fixes from daily use (2026-10-18)
+
+- A click inside the card sheet started a text selection that followed the pointer. The sheet, dialogs and three menu buttons stopped click propagation, which also swallowed the mouse up that ends a gpui-kit window selection. They use `occlude()` now. Rule: never `stop_propagation` in an `on_click` to keep a click off a parent. Use `occlude()`.
+- The sidebar (180 to 420 px) and the card sheet (420 px up to leaving the board 320 px) resize by dragging their edge. Widths are saved in `config.json`.
+- Subtasks wrap, and their inline code renders as code. Card excerpts are plain text.
+
 ## App icon and releases (2026-10-14)
 
 - The app icon is the sidebar's kanban mark in lime on an ink rounded tile. `scripts/app-icon.sh` rebuilds the `.icns`, `.ico` and `.png` from `app-icon.svg`.
