@@ -174,7 +174,16 @@ pub fn single_instance(config_dir: &Path) -> Option<Instance> {
     let (tx, rx) = unbounded();
     let _ = std::fs::create_dir_all(config_dir);
     let name = |_: ()| instance_name(config_dir).ok();
-    if name(()).is_some_and(|name| Stream::connect(name).is_ok()) {
+    if let Some(mut stream) = name(()).and_then(|name| Stream::connect(name).ok()) {
+        // Stay connected until the first mdk accepts and hangs up. On Windows a client that
+        // leaves before the accept is dropped unseen, and the signal is lost. The wait is
+        // capped so a frozen first mdk cannot hold this launch.
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = std::io::Read::read(&mut stream, &mut [0]);
+            let _ = done.send(());
+        });
+        let _ = wait.recv_timeout(Duration::from_secs(2));
         return None;
     }
     // Nobody answered, so a socket file left here is from a crash. Take it over.
