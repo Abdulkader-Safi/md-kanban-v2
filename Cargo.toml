@@ -7,7 +7,7 @@ default-members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 license = "MIT"
-version = "0.1.0"
+version = "0.1.1"
 
 # Exact pins. Upgrade gpui-kit only on purpose, in its own commit (build spec, principle 7).
 [workspace.dependencies]
