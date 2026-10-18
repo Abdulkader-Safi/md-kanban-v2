@@ -262,10 +262,40 @@ fn subtask_list_and_toggle() {
 }
 
 #[test]
+fn code_spans_split_on_backtick_pairs() {
+    use mdk_format::code_spans;
+    assert_eq!(
+        code_spans("Use `<video>` here, `PROGRESS.md`"),
+        vec![
+            ("Use ", false),
+            ("<video>", true),
+            (" here, ", false),
+            ("PROGRESS.md", true)
+        ]
+    );
+    assert_eq!(code_spans("odd ` tick"), vec![("odd ` tick", false)]);
+    assert_eq!(code_spans(""), vec![]);
+}
+
+#[test]
 fn excerpts() {
     assert_eq!(
         excerpt("# Title\n\nFirst %% private %% line.\nSecond."),
-        "First  line.\nSecond."
+        "First line. Second."
+    );
+    // A real card's body, which used to show its markdown on the card face.
+    assert_eq!(
+        excerpt(
+            "# Export\n\nCovers FR-EXP-01/02/03.\n\n- [ ] Output frame + aspect presets (16:9, 1:1).\n- [x] Run `ffmpeg` **twice**\n* plain bullet\n2. numbered\n## Notes\n> [!note] Heads up\n> See [the spec](https://x.y/spec) and ==this== __too__.\n![shot](pic.png)"
+        ),
+        "Covers FR-EXP-01/02/03. Output frame + aspect presets (16:9, 1:1). Run ffmpeg twice plain bullet numbered Notes Heads up See the spec and this too. shot"
+            .chars()
+            .take(140)
+            .collect::<String>()
+    );
+    assert_eq!(
+        excerpt("> [!warning]- Folded\n> See [x](y) ==now==."),
+        "Folded See x now."
     );
     assert_eq!(excerpt("# Only a title"), "");
     assert_eq!(

@@ -81,12 +81,6 @@ fn card_face(
 ) -> Stateful<Div> {
     let data = &card.data;
     let (red, amber) = due_colors(c.dark);
-    // CSS collapses line breaks in the excerpt. Do the same.
-    let excerpt = card
-        .excerpt
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
     let due = data.due_date.as_ref().map(|due| {
         let (label, tone) = format_due(due, today);
         div()
@@ -192,7 +186,7 @@ fn card_face(
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(data.title.clone()),
         )
-        .when(!excerpt.is_empty(), |d| {
+        .when(!card.excerpt.is_empty(), |d| {
             d.child(
                 div()
                     .text_xs()
@@ -200,7 +194,7 @@ fn card_face(
                     .text_color(c.muted_fg)
                     .line_clamp(2)
                     .text_ellipsis()
-                    .child(excerpt),
+                    .child(card.excerpt.clone()),
             )
         })
         .when(!data.labels.is_empty(), |d| {

@@ -1321,7 +1321,7 @@ mod tests {
         let card = board.visible_cards()[0];
         assert_eq!(card.workspace, "backend");
         assert_eq!(card.subtasks, (1, 2));
-        assert!(card.excerpt.starts_with("Notes  here."));
+        assert_eq!(card.excerpt, "Notes here. one two");
         assert!(card.search_text.contains("fix login") && card.search_text.contains("safi auth"));
     }
 }

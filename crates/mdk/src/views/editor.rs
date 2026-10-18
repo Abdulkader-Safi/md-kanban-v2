@@ -777,23 +777,23 @@ impl Mdk {
                             div()
                                 .id(("subtask", n))
                                 .flex()
-                                .items_center()
+                                .items_start()
                                 .gap_2p5()
                                 .cursor_pointer()
                                 .hover(|s| s.bg(c.secondary))
-                                .child(div().size(px(14.)).flex_shrink_0().map(|d| {
+                                // Level with the first line of text.
+                                .child(div().mt(px(3.)).size(px(14.)).flex_shrink_0().map(|d| {
                                     match subtask.done {
                                         true => d.bg(c.primary),
                                         false => d.border_1().border_color(c.strong),
                                     }
                                 }))
-                                .child(
-                                    div()
-                                        .when(subtask.done, |d| {
-                                            d.text_color(c.muted_fg).line_through()
-                                        })
-                                        .child(subtask.text.clone()),
-                                )
+                                .child(div().flex_1().min_w_0().child(subtask_text(
+                                    &subtask.text,
+                                    subtask.done,
+                                    c,
+                                    cx,
+                                )))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.toggle_preview_subtask(n, window, cx)
                                 }))
@@ -1308,4 +1308,34 @@ impl Mdk {
                     }),
             )
     }
+}
+
+/// A subtask's words, with `inline code` in the mono font as the preview draws it.
+fn subtask_text(text: &str, done: bool, c: Colors, cx: &App) -> StyledText {
+    let theme = cx.theme();
+    let color = if done { c.muted_fg } else { c.fg };
+    let strike = done.then(|| StrikethroughStyle {
+        thickness: px(1.),
+        color: Some(color),
+    });
+    let mut plain = String::new();
+    let runs = mdk_format::code_spans(text)
+        .into_iter()
+        .map(|(span, code)| {
+            plain.push_str(span);
+            TextRun {
+                len: span.len(),
+                font: font(if code {
+                    theme.mono_font_family.clone()
+                } else {
+                    theme.font_family.clone()
+                }),
+                color,
+                background_color: code.then_some(c.secondary),
+                underline: None,
+                strikethrough: strike,
+            }
+        })
+        .collect::<Vec<_>>();
+    StyledText::new(plain).with_runs(runs)
 }

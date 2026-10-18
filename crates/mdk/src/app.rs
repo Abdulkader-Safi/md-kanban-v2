@@ -1470,6 +1470,7 @@ impl Mdk {
                 },
             }
         }
-        cx.notify();
+        // This runs inside a render, where a notify alone draws nothing new.
+        cx.on_next_frame(window, |_, _, cx| cx.notify());
     }
 }

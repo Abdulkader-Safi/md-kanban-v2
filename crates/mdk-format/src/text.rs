@@ -278,17 +278,50 @@ pub fn strip_comments(md: &str) -> String {
     out.join("\n")
 }
 
-/// The card-face excerpt: the body without `%% comments %%` and without its title heading,
-/// cut to 140 characters.
+/// The card-face excerpt: the body as plain text, without `%% comments %%`, its title
+/// heading or any markdown marks, on one line and cut to 140 characters.
 pub fn excerpt(body: &str) -> String {
     static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^#\s+.+$").unwrap());
+    // Quote and callout marks, then a checkbox, bullet, number or heading mark.
+    static LINE_MARKS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?m)^[ \t]*(?:>[ \t]*)*(?:\[![^\]]*\][+-]?[ \t]*)?(?:[-*+][ \t]+\[[ xX]\][ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|#{1,6}[ \t]+)?").unwrap()
+    });
+    // `[label](url)` and `![alt](url)` keep their words.
+    static LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"!?\[([^\]]*)\]\([^)]*\)").unwrap());
+    static MARKS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*|__|==|`").unwrap());
     let visible = strip_comments(body);
-    TITLE
-        .replace(&visible, "")
-        .trim()
+    let text = TITLE.replace(&visible, "");
+    let text = LINE_MARKS.replace_all(&text, "");
+    let text = LINK.replace_all(&text, "$1");
+    let text = MARKS.replace_all(&text, "");
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
         .chars()
         .take(140)
         .collect()
+}
+
+/// A line of text cut into runs, each marked true when it was inside backticks. The
+/// backticks go. An unmatched backtick stays as text.
+pub fn code_spans(text: &str) -> Vec<(&str, bool)> {
+    let mut spans = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('`') {
+        let Some(len) = rest[open + 1..].find('`') else {
+            break;
+        };
+        if open > 0 {
+            spans.push((&rest[..open], false));
+        }
+        spans.push((&rest[open + 1..open + 1 + len], true));
+        rest = &rest[open + 2 + len..];
+    }
+    if !rest.is_empty() {
+        spans.push((rest, false));
+    }
+    spans
 }
 
 // ---- subtasks -------------------------------------------------------------------------------
