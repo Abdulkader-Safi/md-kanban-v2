@@ -2,7 +2,7 @@
 # Run `cargo packager --release` on the OS you are packaging for. Builds are unsigned.
 name = "mdk"
 product-name = "mdk"
-version = "0.1.1"
+version = "0.1.2"
 identifier = "com.abdulkadersafi.mdk"
 description = "The native MD Kanban: a kanban board over a folder of markdown cards."
 authors = ["Abdulkader Safi"]
