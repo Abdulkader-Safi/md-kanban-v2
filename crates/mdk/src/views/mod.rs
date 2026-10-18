@@ -14,7 +14,7 @@ pub use new_card::NewCardForm;
 
 use crate::app::{
     ArchiveDone, Confirm, ConnectFolder, DragCard, FocusDown, FocusLeft, FocusRight, FocusUp, Mdk,
-    NewCardKey, OpenFocused, OpenSettings, PickUp, Redo, RescanAll, ShowBoard, ShowList,
+    NewCardKey, OpenFocused, OpenSettings, PickUp, Redo, RescanAll, Resize, ShowBoard, ShowList,
     TogglePalette, ToggleTheme, ToggleVim, Undo,
 };
 use crate::board::Command;
@@ -133,6 +133,9 @@ impl Render for Mdk {
             .on_action(cx.listener(|this, _: &ArchiveDone, window, cx| {
                 this.run_command(Command::ArchiveDone, window, cx)
             }))
+            .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<Resize>, window, cx| {
+                this.resize(ev, window, cx)
+            }))
             // A folder dropped on the window becomes a project.
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 for path in paths.paths().iter().filter(|p| p.is_dir()) {
@@ -155,7 +158,15 @@ impl Render for Mdk {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .when(!narrow, |d| d.child(self.sidebar(c, cx)))
+                    .when(!narrow, |d| {
+                        d.child(
+                            div()
+                                .relative()
+                                .flex_shrink_0()
+                                .child(self.sidebar(c, cx))
+                                .child(resize_handle(Resize::Sidebar, c).right(px(-3.))),
+                        )
+                    })
                     .child(
                         div()
                             .flex()
@@ -701,6 +712,27 @@ pub(crate) fn toggle(id: impl Into<ElementId>, on: bool, c: Colors) -> Stateful<
                 .size_3()
                 .bg(if on { c.on_primary } else { c.muted_fg }),
         )
+}
+
+/// A thin grab strip on a panel edge. Place it with `left` or `right`.
+pub(crate) fn resize_handle(edge: Resize, c: Colors) -> Stateful<Div> {
+    div()
+        .id(match edge {
+            Resize::Sidebar => "resize-sidebar",
+            Resize::Sheet => "resize-sheet",
+        })
+        .occlude()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(px(6.))
+        .cursor_col_resize()
+        .hover(|s| s.bg(c.link.opacity(0.4)))
+        // The press belongs to the drag, not to a text selection.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            gpui_kit::component::GlobalState::suppress_text_selection(cx)
+        })
+        .on_drag(edge, |edge, _, _, cx| cx.new(|_| *edge))
 }
 
 /// A dialog over the scrim. A click on the scrim runs `close`. Returns (scrim, panel).

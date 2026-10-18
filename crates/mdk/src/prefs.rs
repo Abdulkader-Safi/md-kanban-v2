@@ -93,6 +93,9 @@ pub struct WindowState {
     pub maximized: bool,
 }
 
+pub const SIDEBAR_WIDTH: f32 = 240.;
+pub const EDITOR_WIDTH: f32 = 672.;
+
 /// `"all"` in the file means no project or work folder is selected.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -108,6 +111,9 @@ pub struct Prefs {
     pub view: ViewChoice,
     pub editor_tab: EditorTab,
     pub editor_expanded: bool,
+    /// Dragged widths, in pixels.
+    pub sidebar_width: f32,
+    pub editor_width: f32,
     /// Saved filter views per project id, or `"all"` for All projects.
     pub saved_views: BTreeMap<String, Vec<SavedView>>,
     pub window: Option<WindowState>,
@@ -126,6 +132,8 @@ impl Default for Prefs {
             view: ViewChoice::Board,
             editor_tab: EditorTab::Markdown,
             editor_expanded: false,
+            sidebar_width: SIDEBAR_WIDTH,
+            editor_width: EDITOR_WIDTH,
             saved_views: BTreeMap::new(),
             window: None,
         }

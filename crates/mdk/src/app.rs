@@ -223,6 +223,19 @@ pub struct Grabbed {
     order: f64,
 }
 
+/// The payload of a drag on a panel edge. Nothing follows the pointer.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Resize {
+    Sidebar,
+    Sheet,
+}
+
+impl Render for Resize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
 /// The payload of a card drag. It also draws the preview that follows the pointer.
 #[derive(Clone)]
 pub struct DragCard {
@@ -860,6 +873,25 @@ impl Mdk {
     }
 
     // ---- drag and drop ----------------------------------------------------------------------
+
+    /// A panel edge is being dragged. Each panel keeps enough room for the board.
+    pub(crate) fn resize(
+        &mut self,
+        ev: &DragMoveEvent<Resize>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let x = f32::from(ev.event.position.x);
+        let room = f32::from(window.viewport_size().width);
+        match ev.drag(cx) {
+            Resize::Sidebar => self.prefs.sidebar_width = x.clamp(180., 420.),
+            Resize::Sheet => {
+                self.prefs.editor_width = (room - x).clamp(420., (room - 320.).max(420.))
+            }
+        }
+        self.save_soon(cx);
+        cx.notify();
+    }
 
     /// The pointer moved during a drag. Every column hears this, so check the bounds.
     pub(crate) fn drag_move(

@@ -7,7 +7,7 @@
 //! nothing is written until the user picks a side.
 
 use super::{Colors, choice, field, icon_button, label, status_dot, toggle};
-use crate::app::{Confirm, Mdk};
+use crate::app::{Confirm, Mdk, Resize};
 use crate::board::{Card, CardKey};
 use crate::prefs::EditorTab;
 use crate::theme::icon;
@@ -871,7 +871,7 @@ impl Mdk {
         let width = if expanded {
             window.viewport_size().width * (2. / 3.)
         } else {
-            px(672.)
+            px(self.prefs.editor_width)
         };
         let tab = self.prefs.editor_tab;
         let saving = editor.save_task.is_some();
@@ -1106,6 +1106,9 @@ impl Mdk {
                     .bg(c.card)
                     .border_l_1()
                     .border_color(c.strong)
+                    .when(!expanded, |d| {
+                        d.child(super::resize_handle(Resize::Sheet, c).left(px(-3.)))
+                    })
                     .child(
                         div()
                             .flex()

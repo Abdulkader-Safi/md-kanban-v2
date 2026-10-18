@@ -920,3 +920,38 @@ fn a_click_in_the_sheet_leaves_no_selection_behind(cx: &mut TestAppContext) {
         )
     });
 }
+
+#[gpui_kit::test]
+fn dragging_the_panel_edges_resizes_them(cx: &mut TestAppContext) {
+    use gpui_kit::{base::TextSelection, point, px};
+    let fx = open(cx);
+    fx.open_card(cx, "login.md");
+    let widths = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            let prefs = &fx.view.read(cx).prefs;
+            (prefs.sidebar_width, prefs.editor_width)
+        })
+    };
+    assert_eq!(widths(cx), (240., 672.));
+    // The window is 1440 wide, so the sheet's edge starts at 768.
+    cx.update_window(fx.window.into(), |_, window, cx| {
+        window.drag(point(px(768.), px(600.)), point(px(568.), px(600.)), cx);
+        assert!(!TextSelection::has_selection(window, cx));
+    })
+    .unwrap();
+    assert_eq!(widths(cx), (240., 872.));
+    // Too far: the sheet stops where the board keeps 320 px.
+    cx.update_window(fx.window.into(), |_, window, cx| {
+        window.drag(point(px(568.), px(600.)), point(px(20.), px(600.)), cx);
+    })
+    .unwrap();
+    assert_eq!(widths(cx), (240., 1120.));
+    cx.update_window(fx.window.into(), |_, window, cx| window.press("escape", cx))
+        .unwrap();
+    fx.settle(cx);
+    cx.update_window(fx.window.into(), |_, window, cx| {
+        window.drag(point(px(240.), px(600.)), point(px(300.), px(600.)), cx);
+    })
+    .unwrap();
+    assert_eq!(widths(cx), (300., 1120.));
+}

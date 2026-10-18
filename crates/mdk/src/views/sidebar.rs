@@ -177,7 +177,7 @@ impl Mdk {
             .flex()
             .flex_col()
             .flex_shrink_0()
-            .w(px(240.))
+            .w(px(self.prefs.sidebar_width))
             .h_full()
             .overflow_y_scroll()
             .bg(c.sidebar)
