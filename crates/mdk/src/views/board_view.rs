@@ -59,9 +59,9 @@ fn move_menu(key: &CardKey, current: Status, this: &Entity<Mdk>, c: Colors) -> i
                     true => d.opacity(0.4),
                     false => d
                         .cursor_pointer()
+                        .occlude()
                         .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
                         .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
                             this.update(cx, |this, cx| this.move_card(&key, status, None, cx))
                         }),
                 })
@@ -164,8 +164,8 @@ fn card_face(
                         .text_color(c.muted_fg)
                         .hover(|s| s.bg(c.accent).text_color(c.accent_fg))
                         .child(icon("dots").size_4())
+                        .occlude()
                         .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
                             toggle.update(cx, |this, cx| {
                                 let open = this.menu_for.as_ref() == Some(&key);
                                 this.menu_for = (!open).then(|| key.clone());

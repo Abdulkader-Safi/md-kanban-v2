@@ -168,10 +168,8 @@ impl Mdk {
                         .px_1()
                         .hover(|s| s.text_color(c.danger))
                         .child("×")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.delete_view(n, cx)
-                        })),
+                        .occlude()
+                        .on_click(cx.listener(move |this, _, _, cx| this.delete_view(n, cx))),
                 )
         });
         let views: Vec<_> = views.collect();

@@ -727,8 +727,7 @@ pub(crate) fn dialog(
         .flex_col()
         .bg(c.card)
         .border_1()
-        .border_color(c.strong)
-        .on_click(|_, _, cx| cx.stop_propagation());
+        .border_color(c.strong);
     (backdrop, panel)
 }
 

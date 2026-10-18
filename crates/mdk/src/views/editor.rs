@@ -1106,7 +1106,6 @@ impl Mdk {
                     .bg(c.card)
                     .border_l_1()
                     .border_color(c.strong)
-                    .on_click(|_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .flex()

@@ -850,3 +850,73 @@ fn ticking_a_subtask_in_the_preview_changes_the_file(cx: &mut TestAppContext) {
             .contains("- [x] first subtask\n- [ ] second subtask\n")
     );
 }
+
+#[gpui_kit::test]
+fn a_click_in_the_sheet_leaves_no_selection_behind(cx: &mut TestAppContext) {
+    use gpui_kit::{
+        InputEvent as _, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+        base::TextSelection, point, px,
+    };
+    let fx = open(cx);
+    fx.with(cx, |view, _, cx| {
+        view.prefs.editor_tab = mdk::prefs::EditorTab::Preview;
+        cx.notify();
+    });
+    cx.executor().allow_parking();
+    fx.open_card(cx, "login.md");
+    // The preview parses on a background thread. Give it a few frames to draw text.
+    for _ in 0..10 {
+        fx.settle(cx);
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    cx.update_window(fx.window.into(), |_, window, cx| {
+        // Press and release just above the preview, then let the pointer wander over it
+        // with no button held. The click used to start a selection that never ended,
+        // because the sheet swallowed the mouse up.
+        let left = window.within("sheet").find("clean").bounds().origin.x - px(290.);
+        let press = point(left, px(380.));
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Left,
+                position: press,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.dispatch_event(
+            MouseUpEvent {
+                button: MouseButton::Left,
+                position: press,
+                modifiers: Default::default(),
+                click_count: 1,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+        for y in [500., 700., 880.] {
+            window.dispatch_event(
+                MouseMoveEvent {
+                    position: point(left + px(630.), px(y)),
+                    pressed_button: None,
+                    modifiers: Default::default(),
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        let selected = TextSelection::selected_text(window, cx);
+        assert!(selected.is_empty(), "selected {selected:?}");
+    })
+    .unwrap();
+    cx.update(|cx| {
+        assert!(
+            fx.view.read(cx).editor.is_some(),
+            "the click closed the sheet"
+        )
+    });
+}
