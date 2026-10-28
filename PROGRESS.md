@@ -3,6 +3,12 @@
 Milestone log for mdk. The build spec is `resources/06-build-spec.md`.
 
 
+## First Windows run (2026-10-28)
+
+- Release builds use the Windows GUI subsystem, so no console window opens beside mdk. Closing that console used to kill the app. Debug builds keep the console. Logs were already in `mdk.log`.
+- `crates/mdk/build.rs` embeds `icon.ico` in `mdk.exe` as icon resource 1, the ID GPUI loads for the window and taskbar. Explorer and the NSIS shortcuts read the same resource.
+- Open: SmartScreen still says "Windows protected your PC". Only an Authenticode signature fixes that. Not signing for now.
+
 ## Fixes from daily use (2026-10-18)
 
 - A click inside the card sheet started a text selection that followed the pointer. The sheet, dialogs and three menu buttons stopped click propagation, which also swallowed the mouse up that ends a gpui-kit window selection. They use `occlude()` now. Rule: never `stop_propagation` in an `on_click` to keep a click off a parent. Use `occlude()`.

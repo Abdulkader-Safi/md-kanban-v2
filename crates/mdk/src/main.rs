@@ -1,3 +1,6 @@
+// Release builds are GUI apps on Windows: no console window. Logs go to mdk.log.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use gpui_kit::*;
 use mdk::app::Mdk;
 use mdk::prefs::{Prefs, config_dir};
